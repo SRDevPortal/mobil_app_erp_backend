@@ -362,6 +362,15 @@ curl -sS -X POST "http://localhost:3101/api/v1/profiles/sync" \
 
 **Note:** There is **no** Resource API fallback for profile rows. Many sites only store profiles as the **`profiles`** child table on **Mobile App User**; calling **`/api/resource/Mobile App User Profile`** then returns **404**. Fix Frappe **`users_full_sync`** / token instead.
 
+**Troubleshooting — `AttributeError: 'bytes' object has no attribute 'get'` in `users_full_sync`:**  
+The Node proxy sends valid **`Content-Type: application/json`**. This error means **`mobile_app/api/v1.py`** is using the **raw body** (e.g. `frappe.request.data`) as a dict. Parse JSON first on the bench, for example right after `require_app_token()`:
+
+```python
+data = frappe.parse_json(frappe.request.data or "{}")
+```
+
+(Or build **`data`** from **`frappe.form_dict`** and drop keys like **`cmd`**.) The Node API cannot fix this without a Frappe change.
+
 ---
 
 ## 6) Upsert Mobile App Disease (master)
