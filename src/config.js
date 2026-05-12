@@ -1,0 +1,46 @@
+require("dotenv").config();
+
+const trim = (v) => (v || "").toString().trim();
+
+/** Strip BOM / whitespace (Windows .env UTF-8 BOM breaks strict token match). */
+function normalizeSecret(v) {
+  return trim(v).replace(/^\uFEFF/, "");
+}
+
+const ERP_BASE_URL = trim(process.env.ERP_BASE_URL || "").replace(/\/+$/, "");
+const ERP_TOKEN = normalizeSecret(process.env.ERP_TOKEN || "");
+const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase();
+const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
+const PORT = Number(process.env.PORT || 3101);
+
+const DOCTYPE = {
+  MOBILE_APP_USER: trim(process.env.DOCTYPE_MOBILE_APP_USER || "Mobile App User"),
+  MOBILE_APP_USER_SESSION: trim(process.env.DOCTYPE_MOBILE_APP_USER_SESSION || "Mobile App User Session"),
+  MOBILE_APP_USER_PROFILE: trim(process.env.DOCTYPE_MOBILE_APP_USER_PROFILE || "Mobile App User Profile"),
+  MOBILE_APP_DISEASE: trim(process.env.DOCTYPE_MOBILE_APP_DISEASE || "Mobile App Disease"),
+  MOBILE_APP_USER_DISEASE_SELECTION:
+    trim(process.env.DOCTYPE_MOBILE_APP_USER_DISEASE_SELECTION || "Mobile App User Disease Selection"),
+  MOBILE_APP_HEALTH_ENTRY: trim(process.env.DOCTYPE_MOBILE_APP_HEALTH_ENTRY || "Mobile App Health Entry"),
+  MOBILE_APP_PRESCRIPTION: trim(process.env.DOCTYPE_MOBILE_APP_PRESCRIPTION || "Mobile App Prescription"),
+  MOBILE_APP_DOCTOR: trim(process.env.DOCTYPE_MOBILE_APP_DOCTOR || "Mobile App Doctor"),
+  MOBILE_APP_APPOINTMENT: trim(process.env.DOCTYPE_MOBILE_APP_APPOINTMENT || "Mobile App Appointment"),
+  MOBILE_APP_NOTIFICATION: trim(process.env.DOCTYPE_MOBILE_APP_NOTIFICATION || "Mobile App Notification"),
+  MOBILE_APP_SUPPORT_TICKET: trim(process.env.DOCTYPE_MOBILE_APP_SUPPORT_TICKET || "Mobile App Support Ticket"),
+  MOBILE_APP_WEBHOOK_EVENT: trim(process.env.DOCTYPE_MOBILE_APP_WEBHOOK_EVENT || "Mobile App Webhook Event"),
+};
+
+function erpAuthHeader() {
+  if (!ERP_TOKEN) return {};
+  if (ERP_AUTH_SCHEME === "bearer") return { Authorization: `Bearer ${ERP_TOKEN}` };
+  return { Authorization: `token ${ERP_TOKEN}` };
+}
+
+module.exports = {
+  ERP_BASE_URL,
+  ERP_TOKEN,
+  ERP_AUTH_SCHEME,
+  APP_ERP_TOKEN,
+  PORT,
+  DOCTYPE,
+  erpAuthHeader,
+};

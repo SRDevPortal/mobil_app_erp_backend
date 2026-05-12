@@ -1,0 +1,225 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-backend-erp",
+    "name": "SRIAAS backend-erp",
+    "description": "Node bridge to Frappe MobileApp DocTypes. Set environment: base_url, app_token. Collection pre-request adds ngrok-skip-browser-warning for ngrok free URLs. See POSTMAN.md and API.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "sample_user_external_id", "value": "550e8400-e29b-41d4-a716-446655440000" },
+    { "key": "sample_session_id", "value": "11111111-2222-3333-4444-555555555555" },
+    { "key": "sample_disease_id", "value": "disease-uuid-001" },
+    { "key": "sample_doctor_id", "value": "doc-001" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.request.headers.get('ngrok-skip-browser-warning')) {",
+          "  pm.request.headers.add({ key: 'ngrok-skip-browser-warning', value: 'true' });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1 Health (no auth)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/health"
+      }
+    },
+    {
+      "name": "2 Users — sync",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"supabase_user_id\": \"sub_abc123\",\n  \"email\": \"patient@example.com\",\n  \"phone\": \"+919876543210\",\n  \"full_name\": \"Test Patient\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Patient\",\n  \"is_active\": true\n}"
+        },
+        "url": "{{base_url}}/api/v1/users/sync"
+      }
+    },
+    {
+      "name": "3 Users — lookup",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-ERP-Token", "value": "{{app_token}}" }],
+        "url": "{{base_url}}/api/v1/users/lookup?external_id={{sample_user_external_id}}"
+      }
+    },
+    {
+      "name": "4 Users — sessions sync",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"session_external_id\": \"{{sample_session_id}}\",\n  \"device_info\": { \"platform\": \"android\" },\n  \"ip_address\": \"203.0.113.1\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/users/sessions/sync"
+      }
+    },
+    {
+      "name": "5 Profiles — sync",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"profile_name\": \"Test Patient\",\n  \"phone\": \"+919876543210\",\n  \"gender\": \"male\",\n  \"age\": 40,\n  \"height\": 170,\n  \"weight\": 72,\n  \"email\": \"patient@example.com\",\n  \"profile_complete\": true,\n  \"force_profile_setup\": false\n}"
+        },
+        "url": "{{base_url}}/api/v1/profiles/sync"
+      }
+    },
+    {
+      "name": "6 Diseases — sync",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_disease_id}}\",\n  \"disease_name\": \"Diabetes\",\n  \"handle\": \"diabetes\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+        },
+        "url": "{{base_url}}/api/v1/diseases/sync"
+      }
+    },
+    {
+      "name": "7 Disease selections — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"disease_id\": \"{{sample_disease_id}}\",\n  \"disease_name\": \"Diabetes\",\n  \"is_active\": true\n}"
+        },
+        "url": "{{base_url}}/api/v1/disease-selections"
+      }
+    },
+    {
+      "name": "8 Health entries — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"tool_key\": \"bp_data\",\n  \"entry_id\": \"local-entry-1\",\n  \"entry_timestamp\": \"2026-05-12T08:00:00.000Z\",\n  \"data_json\": { \"systolic\": 120, \"diastolic\": 80 },\n  \"source\": \"app\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/health-entries"
+      }
+    },
+    {
+      "name": "9 Prescriptions — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"file_name\": \"rx.pdf\",\n  \"file_type\": \"application/pdf\",\n  \"file_size\": 245678,\n  \"file_url\": \"https://storage.example.com/rx.pdf\",\n  \"notes\": \"Follow-up dose\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/prescriptions"
+      }
+    },
+    {
+      "name": "10 Doctors — sync",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_doctor_id}}\",\n  \"doctor_name\": \"Dr. Example\",\n  \"specialty\": \"Nephrology\",\n  \"tags\": [\"diabetes\"],\n  \"is_active\": true\n}"
+        },
+        "url": "{{base_url}}/api/v1/doctors/sync"
+      }
+    },
+    {
+      "name": "11 Appointments — create or update",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"booking_id\": \"BK-2026-00001\",\n  \"patient_name\": \"Test Patient\",\n  \"patient_email\": \"patient@example.com\",\n  \"patient_phone\": \"+919876543210\",\n  \"appointment_type\": \"OPD\",\n  \"appointment_date\": \"2026-05-20\",\n  \"appointment_time\": \"10:30\",\n  \"status\": \"pending\",\n  \"doctor_id\": \"{{sample_doctor_id}}\",\n  \"doctor_name\": \"Dr. Example\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/appointments"
+      }
+    },
+    {
+      "name": "12 Notifications — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"title\": \"Reminder\",\n  \"body\": \"Take your medicine\",\n  \"type\": \"reminder\",\n  \"additional_data\": { \"screen\": \"home\" },\n  \"is_read\": false\n}"
+        },
+        "url": "{{base_url}}/api/v1/notifications"
+      }
+    },
+    {
+      "name": "13 Support tickets — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"name\": \"Test Patient\",\n  \"email\": \"patient@example.com\",\n  \"phone\": \"+919876543210\",\n  \"subject\": \"App crash on login\",\n  \"description\": \"Steps: open app, tap login...\",\n  \"priority\": \"high\",\n  \"status\": \"open\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/support-tickets"
+      }
+    },
+    {
+      "name": "14 Webhook events — create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-ERP-Token", "value": "{{app_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event\": \"health_data_sync\",\n  \"tool\": \"bp_data\",\n  \"customer_email\": \"patient@example.com\",\n  \"customer_id\": \"{{sample_user_external_id}}\",\n  \"timestamp\": \"2026-05-12T10:00:00Z\",\n  \"data\": { \"systolic\": 118 },\n  \"success\": true,\n  \"status_code\": 200,\n  \"response_payload\": { \"ok\": true }\n}"
+        },
+        "url": "{{base_url}}/api/v1/webhook-events"
+      }
+    }
+  ]
+}
