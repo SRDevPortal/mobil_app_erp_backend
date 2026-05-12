@@ -88,6 +88,11 @@ router.post("/verify-supabase", async (req, res) => {
 
     const { saved, external_id } = await upsertMobileAppUser(payload);
 
+    const erpFullName =
+      (saved?.full_name != null && String(saved.full_name).trim() !== ""
+        ? String(saved.full_name).trim()
+        : null) || fullName;
+
     return res.json({
       success: true,
       data: attachCustomerIdentity(
@@ -96,7 +101,7 @@ router.post("/verify-supabase", async (req, res) => {
           mobile_app_user_name: saved?.name ?? null,
           email: email || null,
           phone: phone || null,
-          full_name: fullName,
+          full_name: erpFullName,
         },
         external_id,
       ),

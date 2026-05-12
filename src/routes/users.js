@@ -40,6 +40,65 @@ router.get("/lookup", async (req, res) => {
   }
 });
 
+/**
+ * Full app bootstrap: Mobile App User + linked Profile + active disease selection (matched by supabase_user_id / external_id).
+ */
+router.get("/context", async (req, res) => {
+  try {
+    const user = await findMobileAppUser(req.query || {}, {}, {});
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    const enrichedUser = enrichMobileAppUserForApi(user);
+    const userLinkName = user.name;
+
+    const profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
+      filters: [["user_id", "=", userLinkName]],
+      fields: [
+        "name",
+        "profile_name",
+        "phone",
+        "gender",
+        "age",
+        "height",
+        "weight",
+        "email",
+        "profile_data_json",
+        "modified",
+      ],
+      limit: 1,
+      orderBy: "modified desc",
+    });
+
+    let diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+      filters: [
+        ["user_id", "=", userLinkName],
+        ["is_active", "=", 1],
+      ],
+      fields: ["name", "disease_name", "disease_id", "modified"],
+      limit: 1,
+      orderBy: "modified desc",
+    });
+    if (!diseases.length) {
+      diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+        filters: [["user_id", "=", userLinkName]],
+        fields: ["name", "disease_name", "disease_id", "modified"],
+        limit: 1,
+        orderBy: "modified desc",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        user: attachCustomerIdentity(enrichedUser, enrichedUser.external_id),
+        profile: profiles[0] || null,
+        disease_selection: diseases[0] || null,
+      },
+    });
+  } catch (e) {
+    return res.status(e.status || 500).json({ success: false, message: e.message });
+  }
+});
+
 router.post("/sessions/sync", async (req, res) => {
   try {
     const body = req.body || {};
