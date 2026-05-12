@@ -1,6 +1,9 @@
 const { DOCTYPE, ERP_BASE_URL } = require("../config");
-const { erpGetList, erpGetDoc } = require("../frappeClient");
-const { pickExternalId } = require("../normalize");
+const { erpGetList, erpGetDoc, erpCallMethod } = require("../frappeClient");
+const { pickExternalId, attachCustomerIdentity } = require("../normalize");
+
+/** Child collections returned by `mobile_app.api.v1.users_lookup` — strip from parent doc for `/lookup` and `/sync`. */
+const V1_CHILD_KEYS = ["profiles", "sessions", "medical_items", "appointments", "engagement_items"];
 
 /** Fields safe for Frappe `get_list` on Mobile App User (avoid columns not exposed to list query). */
 const MOBILE_APP_USER_LIST_FIELDS = [
@@ -49,6 +52,127 @@ function enrichMobileAppUserForApi(doc) {
   return { ...doc, avatar_display_url };
 }
 
+/**
+ * Unwrap Frappe `/api/method/...` JSON: `{ message: { success, data } }` or direct doc in `message`.
+ */
+function unwrapMobileAppV1Message(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const msg = parsed.message;
+  if (msg == null) return null;
+  if (typeof msg === "object") {
+    if (msg.success === false) return null;
+    if (msg.data != null && typeof msg.data === "object") return msg.data;
+    if (msg.external_id != null || msg.name != null || msg.full_name != null || msg.supabase_user_id != null) {
+      return msg;
+    }
+  }
+  return null;
+}
+
+function buildUsersLookupQuery(merged = {}) {
+  const q = {};
+  const supabase = merged.supabase_user_id != null ? String(merged.supabase_user_id).trim() : "";
+  const ext = pickExternalId(merged);
+  const email = merged.email != null ? String(merged.email).trim() : "";
+  const phone = merged.phone != null ? String(merged.phone).trim() : "";
+  if (supabase) q.supabase_user_id = supabase;
+  if (ext) q.external_id = ext;
+  if (email) q.email = email;
+  if (phone) q.phone = phone;
+  if (merged.id != null && String(merged.id).trim()) {
+    const id = String(merged.id).trim();
+    if (id) q.id = id;
+  }
+  return q;
+}
+
+function tryParseJson(s) {
+  if (!s || typeof s !== "string") return null;
+  try {
+    return JSON.parse(s);
+  } catch (_) {
+    return null;
+  }
+}
+
+function pickDiseaseFromV1Medical(medicalItems) {
+  if (!Array.isArray(medicalItems) || !medicalItems.length) return null;
+  const forSel = medicalItems.find((r) => /disease/i.test(String(r.record_type || "")));
+  const row = forSel || medicalItems[0];
+  let disease_name = row.title || row.disease_name || "";
+  if (!disease_name && row.payload_json != null) {
+    if (typeof row.payload_json === "string") {
+      const p = tryParseJson(row.payload_json);
+      if (p && (p.disease_name || p.name)) disease_name = p.disease_name || p.name || "";
+    } else if (typeof row.payload_json === "object") {
+      disease_name = row.payload_json.disease_name || row.payload_json.name || "";
+    }
+  }
+  return {
+    name: row.name,
+    disease_name: disease_name || (row.record_external_id != null ? String(row.record_external_id) : ""),
+    disease_id: row.record_external_id,
+    record_type: row.record_type,
+  };
+}
+
+function stripV1ChildTables(doc) {
+  if (!doc || typeof doc !== "object") return doc;
+  const copy = { ...doc };
+  V1_CHILD_KEYS.forEach((k) => {
+    delete copy[k];
+  });
+  return copy;
+}
+
+function partitionV1UsersLookupData(data) {
+  if (!data || typeof data !== "object") {
+    return { user: null, profile: null, disease_selection: null };
+  }
+  const profiles = data.profiles;
+  const medical_items = data.medical_items;
+  const user = enrichMobileAppUserForApi(stripV1ChildTables(data));
+  const profile = Array.isArray(profiles) && profiles.length ? profiles[0] : null;
+  const disease_selection = pickDiseaseFromV1Medical(medical_items);
+  return { user, profile, disease_selection };
+}
+
+/**
+ * Preferred path: Frappe `mobile_app.api.v1.users_lookup` (full doc + child tables).
+ * Returns `null` if unavailable or user not found — callers fall back to Resource API.
+ */
+async function tryUsersLookupV1(merged = {}) {
+  const q = buildUsersLookupQuery(merged);
+  if (!q || Object.keys(q).length === 0) return null;
+  try {
+    const parsed = await erpCallMethod("mobile_app.api.v1.users_lookup", {
+      method: "GET",
+      query: q,
+    });
+    const data = unwrapMobileAppV1Message(parsed);
+    if (!data || typeof data !== "object") return null;
+    return data;
+  } catch (e) {
+    console.warn("[userService] mobile_app.api.v1.users_lookup failed, legacy fallback:", e.message);
+    return null;
+  }
+}
+
+async function syncMobileAppUserViaV1(body = {}) {
+  try {
+    const parsed = await erpCallMethod("mobile_app.api.v1.users_sync", {
+      method: "POST",
+      body,
+    });
+    const data = unwrapMobileAppV1Message(parsed);
+    if (!data || typeof data !== "object") return null;
+    return enrichMobileAppUserForApi(stripV1ChildTables(data));
+  } catch (e) {
+    console.warn("[userService] mobile_app.api.v1.users_sync failed, legacy fallback:", e.message);
+    return null;
+  }
+}
+
 function userLookupFilters(body = {}, params = {}, query = {}) {
   const merged = { ...query, ...params, ...body };
   const external_id = pickExternalId(merged);
@@ -76,10 +200,10 @@ async function findMobileAppUser(body = {}, params = {}, query = {}) {
 }
 
 /**
- * Resolves user for API responses: safe list row + full document merge (image / URL fields often
+ * Legacy: Resource API — safe list row + full document merge (image / URL fields often
  * fail get_list with "Field not permitted in query" on custom sites).
  */
-async function getMobileAppUserForApi(body = {}, params = {}, query = {}) {
+async function getMobileAppUserForApiLegacy(body = {}, params = {}, query = {}) {
   const row = await findMobileAppUser(body, params, query);
   if (!row?.name) return null;
   let merged = { ...row };
@@ -92,6 +216,82 @@ async function getMobileAppUserForApi(body = {}, params = {}, query = {}) {
     console.warn("[userService] erpGetDoc Mobile App User failed:", e.message);
   }
   return enrichMobileAppUserForApi(merged);
+}
+
+/**
+ * Resolves user for API: tries `mobile_app.api.v1.users_lookup` first, then Resource API.
+ */
+async function getMobileAppUserForApi(body = {}, params = {}, query = {}) {
+  const merged = { ...query, ...params, ...body };
+  const v1Data = await tryUsersLookupV1(merged);
+  if (v1Data) {
+    return enrichMobileAppUserForApi(stripV1ChildTables(v1Data));
+  }
+  return getMobileAppUserForApiLegacy(body, params, query);
+}
+
+/**
+ * Bootstrap payload for Flutter: user + profile + disease — V1 first, else Resource + child lists.
+ */
+async function getUserContextForApi(query = {}) {
+  const merged = { ...query };
+  const v1Data = await tryUsersLookupV1(merged);
+  if (v1Data) {
+    const { user, profile, disease_selection } = partitionV1UsersLookupData(v1Data);
+    if (!user || typeof user !== "object") return null;
+    const ext = user.external_id != null ? String(user.external_id).trim() : "";
+    return {
+      user: attachCustomerIdentity(user, ext),
+      profile,
+      disease_selection,
+    };
+  }
+
+  const enrichedUser = await getMobileAppUserForApiLegacy(merged, {}, {});
+  if (!enrichedUser?.name) return null;
+  const userLinkName = enrichedUser.name;
+
+  const profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
+    filters: [["user_id", "=", userLinkName]],
+    fields: [
+      "name",
+      "profile_name",
+      "phone",
+      "gender",
+      "age",
+      "height",
+      "weight",
+      "email",
+      "profile_data_json",
+      "modified",
+    ],
+    limit: 1,
+    orderBy: "modified desc",
+  });
+
+  let diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+    filters: [
+      ["user_id", "=", userLinkName],
+      ["is_active", "=", 1],
+    ],
+    fields: ["name", "disease_name", "disease_id", "modified"],
+    limit: 1,
+    orderBy: "modified desc",
+  });
+  if (!diseases.length) {
+    diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+      filters: [["user_id", "=", userLinkName]],
+      fields: ["name", "disease_name", "disease_id", "modified"],
+      limit: 1,
+      orderBy: "modified desc",
+    });
+  }
+
+  return {
+    user: attachCustomerIdentity(enrichedUser, enrichedUser.external_id),
+    profile: profiles[0] || null,
+    disease_selection: diseases[0] || null,
+  };
 }
 
 /**
@@ -118,7 +318,13 @@ async function resolveUserMiddleware(req, res, next) {
 module.exports = {
   findMobileAppUser,
   getMobileAppUserForApi,
+  getMobileAppUserForApiLegacy,
+  getUserContextForApi,
   enrichMobileAppUserForApi,
   resolveUserMiddleware,
   userLookupFilters,
+  tryUsersLookupV1,
+  syncMobileAppUserViaV1,
+  unwrapMobileAppV1Message,
+  partitionV1UsersLookupData,
 };

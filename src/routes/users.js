@@ -3,7 +3,12 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { DOCTYPE, ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
-const { findMobileAppUser, getMobileAppUserForApi } = require("../services/userService");
+const {
+  findMobileAppUser,
+  getMobileAppUserForApi,
+  getUserContextForApi,
+  syncMobileAppUserViaV1,
+} = require("../services/userService");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
 const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity } = require("../normalize");
 
@@ -15,7 +20,16 @@ const upload = multer({
 
 router.post("/sync", async (req, res) => {
   try {
-    const { saved, external_id } = await upsertMobileAppUser(req.body || {});
+    const body = req.body || {};
+    const fromV1 = await syncMobileAppUserViaV1(body);
+    if (fromV1) {
+      const ext = fromV1.external_id ?? pickExternalId(body);
+      return res.json({
+        success: true,
+        data: attachCustomerIdentity(fromV1, ext),
+      });
+    }
+    const { saved, external_id } = await upsertMobileAppUser(body);
     const ext = saved?.external_id ?? external_id;
     return res.json({
       success: true,
@@ -44,53 +58,11 @@ router.get("/lookup", async (req, res) => {
  */
 router.get("/context", async (req, res) => {
   try {
-    const enrichedUser = await getMobileAppUserForApi(req.query || {}, {}, {});
-    if (!enrichedUser) return res.status(404).json({ success: false, message: "User not found" });
-    const userLinkName = enrichedUser.name;
-
-    const profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
-      filters: [["user_id", "=", userLinkName]],
-      fields: [
-        "name",
-        "profile_name",
-        "phone",
-        "gender",
-        "age",
-        "height",
-        "weight",
-        "email",
-        "profile_data_json",
-        "modified",
-      ],
-      limit: 1,
-      orderBy: "modified desc",
-    });
-
-    let diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
-      filters: [
-        ["user_id", "=", userLinkName],
-        ["is_active", "=", 1],
-      ],
-      fields: ["name", "disease_name", "disease_id", "modified"],
-      limit: 1,
-      orderBy: "modified desc",
-    });
-    if (!diseases.length) {
-      diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
-        filters: [["user_id", "=", userLinkName]],
-        fields: ["name", "disease_name", "disease_id", "modified"],
-        limit: 1,
-        orderBy: "modified desc",
-      });
-    }
-
+    const data = await getUserContextForApi(req.query || {});
+    if (!data?.user) return res.status(404).json({ success: false, message: "User not found" });
     return res.json({
       success: true,
-      data: {
-        user: attachCustomerIdentity(enrichedUser, enrichedUser.external_id),
-        profile: profiles[0] || null,
-        disease_selection: diseases[0] || null,
-      },
+      data,
     });
   } catch (e) {
     return res.status(e.status || 500).json({ success: false, message: e.message });

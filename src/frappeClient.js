@@ -73,10 +73,22 @@ async function erpGetDoc(doctype, name) {
   return payload?.data || null;
 }
 
+/**
+ * Call `mobile_app.api.*` whitelisted methods, e.g. `mobile_app.api.v1.users_lookup`.
+ * Path: `/api/method/mobile_app.api.v1.users_lookup`
+ */
+async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, body } = {}) {
+  const clean = String(methodDottedPath || "").trim().replace(/^\/+/, "");
+  if (!clean) throw Object.assign(new Error("erpCallMethod: missing method path"), { status: 400 });
+  const path = `/api/method/${clean}`;
+  return erpFetch(path, { method, query, body });
+}
+
 module.exports = {
   erpFetch,
   erpGetList,
   erpCreate,
   erpUpdate,
   erpGetDoc,
+  erpCallMethod,
 };
