@@ -1,8 +1,32 @@
-const { ERP_BASE_URL, ERP_TOKEN, erpAuthHeader } = require("./config");
+const {
+  ERP_BASE_URL,
+  ERP_TOKEN,
+  MOBILE_APP_ERP_TOKEN,
+  erpAuthHeader,
+  erpAuthHeaderMobileV1,
+} = require("./config");
 
-async function erpFetch(path, { method = "GET", body, query } = {}) {
+/**
+ * @param {"resource"|"mobileV1"} auth - `resource` = Desk API `Authorization: token key:secret`;
+ *   `mobileV1` = `mobile_app.api.v1.*` app token (`X-ERP-Token` + `Bearer` only).
+ */
+async function erpFetch(path, { method = "GET", body, query, auth = "resource" } = {}) {
   if (!ERP_BASE_URL) throw Object.assign(new Error("ERP_BASE_URL is not configured"), { status: 503 });
-  if (!ERP_TOKEN) throw Object.assign(new Error("ERP_TOKEN is not configured"), { status: 503 });
+
+  const hasMobile = Boolean(MOBILE_APP_ERP_TOKEN || ERP_TOKEN);
+  const hasResource = Boolean(ERP_TOKEN);
+  if (auth === "mobileV1") {
+    if (!hasMobile) {
+      throw Object.assign(
+        new Error(
+          "ERP_TOKEN or MOBILE_APP_ERP_TOKEN must be set for mobile_app.api.v1 calls (match site_config mobile_app_erp_token)"
+        ),
+        { status: 503 }
+      );
+    }
+  } else if (!hasResource) {
+    throw Object.assign(new Error("ERP_TOKEN is not configured"), { status: 503 });
+  }
 
   const url = new URL(`${ERP_BASE_URL}${path}`);
   if (query && typeof query === "object") {
@@ -13,11 +37,13 @@ async function erpFetch(path, { method = "GET", body, query } = {}) {
     }
   }
 
+  const authHeaders = auth === "mobileV1" ? erpAuthHeaderMobileV1() : erpAuthHeader();
+
   const response = await fetch(url.toString(), {
     method,
     headers: {
       "Content-Type": "application/json",
-      ...erpAuthHeader(),
+      ...authHeaders,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -90,7 +116,7 @@ async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, bod
   const clean = String(methodDottedPath || "").trim().replace(/^\/+/, "");
   if (!clean) throw Object.assign(new Error("erpCallMethod: missing method path"), { status: 400 });
   const path = `/api/method/${clean}`;
-  return erpFetch(path, { method, query, body });
+  return erpFetch(path, { method, query, body, auth: "mobileV1" });
 }
 
 module.exports = {

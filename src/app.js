@@ -8,6 +8,7 @@ const {
   APP_ERP_TOKEN,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  mobileAppV1TokenConfigured,
 } = require("./config");
 const { requireAppToken } = require("./middleware/requireAppToken");
 
@@ -39,6 +40,8 @@ function createApp() {
       frappe: {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
         tokenConfigured: Boolean(ERP_TOKEN),
+        /** `mobile_app.api.v1.*` — uses MOBILE_APP_ERP_TOKEN or ERP_TOKEN with Bearer + X-ERP-Token */
+        mobileAppV1TokenConfigured: mobileAppV1TokenConfigured(),
         appTokenConfigured: Boolean(APP_ERP_TOKEN),
         doctypes: DOCTYPE,
       },

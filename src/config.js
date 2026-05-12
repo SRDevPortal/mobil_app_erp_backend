@@ -9,6 +9,8 @@ function normalizeSecret(v) {
 
 const ERP_BASE_URL = trim(process.env.ERP_BASE_URL || "").replace(/\/+$/, "");
 const ERP_TOKEN = normalizeSecret(process.env.ERP_TOKEN || "");
+/** Same value as Frappe `site_config.json` → `mobile_app_erp_token`. If set, used for `mobile_app.api.v1.*` only. */
+const MOBILE_APP_ERP_TOKEN = normalizeSecret(process.env.MOBILE_APP_ERP_TOKEN || "");
 const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase();
 const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
 const PORT = Number(process.env.PORT || 3101);
@@ -50,9 +52,28 @@ function erpAuthHeader() {
   return headers;
 }
 
+/**
+ * Auth for Frappe `mobile_app.api.v1.*` — `require_app_token()` checks **`mobile_app_erp_token`**.
+ * Use **only** `X-ERP-Token` + **`Authorization: Bearer`** (do not send `Authorization: token api_key:secret`
+ * here — that breaks validation when `ERP_TOKEN` is a Desk API key).
+ */
+function erpAuthHeaderMobileV1() {
+  const token = (MOBILE_APP_ERP_TOKEN || ERP_TOKEN || "").trim();
+  if (!token) return {};
+  return {
+    "X-ERP-Token": token,
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+function mobileAppV1TokenConfigured() {
+  return Boolean(MOBILE_APP_ERP_TOKEN || ERP_TOKEN);
+}
+
 module.exports = {
   ERP_BASE_URL,
   ERP_TOKEN,
+  MOBILE_APP_ERP_TOKEN,
   ERP_AUTH_SCHEME,
   APP_ERP_TOKEN,
   PORT,
@@ -60,4 +81,6 @@ module.exports = {
   SUPABASE_ANON_KEY,
   DOCTYPE,
   erpAuthHeader,
+  erpAuthHeaderMobileV1,
+  mobileAppV1TokenConfigured,
 };

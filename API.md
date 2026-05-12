@@ -63,7 +63,12 @@ The JSON error shape applies to **handled** routes and the global **500** error 
 
 ## Frappe ERP (`mobile_app`) — upstream methods this service calls
 
-Your Node API is a **thin proxy**. Configure **`ERP_BASE_URL`** and **`ERP_TOKEN`** / **`ERP_AUTH_SCHEME`** so they match Frappe **`mobile_app_erp_token`** (see `site_config.json`) — same secret as in **`api-list-erp.md`**.
+Your Node API is a **thin proxy**. Configure **`ERP_BASE_URL`** and:
+
+- **`MOBILE_APP_ERP_TOKEN`** — **exactly** the same string as **`mobile_app_erp_token`** in `sites/<site>/site_config.json` (used for **`mobile_app.api.v1.*`** via `X-ERP-Token` + `Bearer`).
+- **`ERP_TOKEN`** — often a Desk **API key** (`api_key:api_secret`) for **`/api/resource/...`**; if you use one secret for everything, you can set only **`ERP_TOKEN`** to the mobile token and omit **`MOBILE_APP_ERP_TOKEN`**.
+
+See **`api-list-erp.md`** and `.env.example`.
 
 | This backend | Frappe method path | Purpose |
 |--------------|---------------------|---------|
