@@ -31,9 +31,18 @@ async function erpFetch(path, { method = "GET", body, query } = {}) {
   }
 
   if (!response.ok) {
-    const err = new Error(parsed?.message || parsed?.exc || `ERP call failed: ${response.status}`);
+    let msg = parsed?.message || parsed?.exc || parsed?._error_message;
+    if (!msg || String(msg).trim() === "") {
+      msg = `ERP HTTP ${response.status} ${method} ${path}`;
+      if (response.status === 404) {
+        msg +=
+          ". Unknown route or API method on Frappe (confirm mobile_app app is installed and migrated; method mobile_app.api.v1.users_full_sync exists). Ensure ERP_TOKEN matches site_config.json mobile_app_erp_token and try ERP_AUTH_SCHEME=bearer on Render.";
+      }
+    }
+    const err = new Error(msg);
     err.status = response.status;
     err.payload = parsed;
+    err.frappePath = path;
     throw err;
   }
 

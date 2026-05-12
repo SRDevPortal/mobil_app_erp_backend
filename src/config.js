@@ -33,10 +33,21 @@ const DOCTYPE = {
   MOBILE_APP_WEBHOOK_EVENT: trim(process.env.DOCTYPE_MOBILE_APP_WEBHOOK_EVENT || "Mobile App Webhook Event"),
 };
 
+/**
+ * Frappe Resource API often uses `Authorization: token api_key:secret`.
+ * **`mobile_app.api.v1.*`** (users_lookup, users_full_sync, …) expects the same secret as
+ * **`site_config.json` → `mobile_app_erp_token`** via **`X-ERP-Token`** or **`Bearer`** — see api-list-erp.md.
+ * We always send **X-ERP-Token** when `ERP_TOKEN` is set so V1 methods authenticate reliably.
+ */
 function erpAuthHeader() {
   if (!ERP_TOKEN) return {};
-  if (ERP_AUTH_SCHEME === "bearer") return { Authorization: `Bearer ${ERP_TOKEN}` };
-  return { Authorization: `token ${ERP_TOKEN}` };
+  const headers = { "X-ERP-Token": ERP_TOKEN };
+  if (ERP_AUTH_SCHEME === "bearer") {
+    headers.Authorization = `Bearer ${ERP_TOKEN}`;
+  } else {
+    headers.Authorization = `token ${ERP_TOKEN}`;
+  }
+  return headers;
 }
 
 module.exports = {

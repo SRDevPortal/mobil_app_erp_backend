@@ -75,6 +75,12 @@ Your Node API is a **thin proxy**. Configure **`ERP_BASE_URL`** and **`ERP_TOKEN
 
 **Why `profiles/sync` used to return `ERP call failed: 404`:** the old implementation called **`/api/resource/Mobile App User Profile`** as a standalone DocType. In your desk UI, profile rows live on the **Mobile App User** form as the **`profiles` child table** (`Mobile App User Profile Item`). That Resource path may not exist or match — Frappe returns **404**. The fix is **`users_full_sync`** with a **`profiles`** array (same as Postman/curl on Frappe directly).
 
+**Still 404 after deploy?**
+
+1. **`ERP_TOKEN`** on Render must equal Frappe **`mobile_app_erp_token`** in `site_config.json` (not necessarily the same as a Desk API key). Prefer **`ERP_AUTH_SCHEME=bearer`** when that token is a bare secret string.
+2. Confirm on Frappe: **`bench --site <yoursite> console`** or Desk → check whitelisted method **`mobile_app.api.v1.users_full_sync`** exists (`bench migrate` after pulling `mobile_app`).
+3. Call Frappe directly: `POST {{ERP_BASE_URL}}/api/method/mobile_app.api.v1.users_full_sync` with **`X-ERP-Token`** — if that 404s, fix ERP before Node.
+
 ---
 
 ## Authentication
