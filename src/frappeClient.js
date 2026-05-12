@@ -1,32 +1,8 @@
-const {
-  ERP_BASE_URL,
-  ERP_TOKEN,
-  MOBILE_APP_ERP_TOKEN,
-  erpAuthHeader,
-  erpAuthHeaderMobileV1,
-} = require("./config");
+const { ERP_BASE_URL, ERP_TOKEN, erpAuthHeader } = require("./config");
 
-/**
- * @param {"resource"|"mobileV1"} auth - `resource` = Desk API `Authorization: token key:secret`;
- *   `mobileV1` = `mobile_app.api.v1.*` app token (`X-ERP-Token` + `Bearer` only).
- */
-async function erpFetch(path, { method = "GET", body, query, auth = "resource" } = {}) {
+async function erpFetch(path, { method = "GET", body, query } = {}) {
   if (!ERP_BASE_URL) throw Object.assign(new Error("ERP_BASE_URL is not configured"), { status: 503 });
-
-  const hasMobile = Boolean(MOBILE_APP_ERP_TOKEN || ERP_TOKEN);
-  const hasResource = Boolean(ERP_TOKEN);
-  if (auth === "mobileV1") {
-    if (!hasMobile) {
-      throw Object.assign(
-        new Error(
-          "ERP_TOKEN or MOBILE_APP_ERP_TOKEN must be set for mobile_app.api.v1 calls (match site_config mobile_app_erp_token)"
-        ),
-        { status: 503 }
-      );
-    }
-  } else if (!hasResource) {
-    throw Object.assign(new Error("ERP_TOKEN is not configured"), { status: 503 });
-  }
+  if (!ERP_TOKEN) throw Object.assign(new Error("ERP_TOKEN is not configured"), { status: 503 });
 
   const url = new URL(`${ERP_BASE_URL}${path}`);
   if (query && typeof query === "object") {
@@ -37,13 +13,11 @@ async function erpFetch(path, { method = "GET", body, query, auth = "resource" }
     }
   }
 
-  const authHeaders = auth === "mobileV1" ? erpAuthHeaderMobileV1() : erpAuthHeader();
-
   const response = await fetch(url.toString(), {
     method,
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders,
+      ...erpAuthHeader(),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -62,7 +36,7 @@ async function erpFetch(path, { method = "GET", body, query, auth = "resource" }
       msg = `ERP HTTP ${response.status} ${method} ${path}`;
       if (response.status === 404) {
         msg +=
-          ". Unknown route or API method on Frappe (confirm mobile_app app is installed and migrated; method mobile_app.api.v1.users_full_sync exists). Ensure ERP_TOKEN matches site_config.json mobile_app_erp_token and try ERP_AUTH_SCHEME=bearer on Render.";
+          ". Unknown route or DocType/method on Frappe. Check ERP_BASE_URL and that the method or Resource exists.";
       }
     }
     const err = new Error(msg);
@@ -109,14 +83,14 @@ async function erpGetDoc(doctype, name) {
 }
 
 /**
- * Call `mobile_app.api.*` whitelisted methods, e.g. `mobile_app.api.v1.users_lookup`.
- * Path: `/api/method/mobile_app.api.v1.users_lookup`
+ * Call `mobile_app.api.*` methods, e.g. `mobile_app.api.v1.users_full_sync`.
+ * Same **ERP_TOKEN** auth as Resource API (`Authorization: token client_id:client_secret`).
  */
 async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, body } = {}) {
   const clean = String(methodDottedPath || "").trim().replace(/^\/+/, "");
   if (!clean) throw Object.assign(new Error("erpCallMethod: missing method path"), { status: 400 });
   const path = `/api/method/${clean}`;
-  return erpFetch(path, { method, query, body, auth: "mobileV1" });
+  return erpFetch(path, { method, query, body });
 }
 
 module.exports = {

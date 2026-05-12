@@ -8,7 +8,6 @@ const {
   APP_ERP_TOKEN,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
-  mobileAppV1TokenConfigured,
 } = require("./config");
 const { requireAppToken } = require("./middleware/requireAppToken");
 
@@ -39,9 +38,9 @@ function createApp() {
       service: "sriaas-backend-erp",
       frappe: {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
-        tokenConfigured: Boolean(ERP_TOKEN),
-        /** `mobile_app.api.v1.*` — uses MOBILE_APP_ERP_TOKEN or ERP_TOKEN with Bearer + X-ERP-Token */
-        mobileAppV1TokenConfigured: mobileAppV1TokenConfigured(),
+        /** Node → Frappe (`Authorization: token client_id:client_secret`) */
+        erpTokenConfigured: Boolean(ERP_TOKEN),
+        /** App / Postman → Node (`X-ERP-Token` = APP_ERP_TOKEN) */
         appTokenConfigured: Boolean(APP_ERP_TOKEN),
         doctypes: DOCTYPE,
       },

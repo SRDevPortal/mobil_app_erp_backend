@@ -61,32 +61,22 @@ The JSON error shape applies to **handled** routes and the global **500** error 
 
 ---
 
-## Frappe ERP (`mobile_app`) — upstream methods this service calls
+## Auth model (two secrets)
 
-Your Node API is a **thin proxy**. Configure **`ERP_BASE_URL`** and:
+| Direction | Env var | How it’s sent |
+|-----------|---------|----------------|
+| **App / Postman → this Node API** | **`APP_ERP_TOKEN`** | Header **`X-ERP-Token`** or **`Authorization: Bearer`** (see § Authentication below). |
+| **This Node API → Frappe** | **`ERP_TOKEN`** | **`Authorization: token <client_id>:<client_secret>`** (Frappe User API key). Optional **`ERP_AUTH_SCHEME=bearer`** for **`Bearer`** instead. |
 
-- **`MOBILE_APP_ERP_TOKEN`** — **exactly** the same string as **`mobile_app_erp_token`** in `sites/<site>/site_config.json` (used for **`mobile_app.api.v1.*`** via `X-ERP-Token` + `Bearer`).
-- **`ERP_TOKEN`** — often a Desk **API key** (`api_key:api_secret`) for **`/api/resource/...`**; if you use one secret for everything, you can set only **`ERP_TOKEN`** to the mobile token and omit **`MOBILE_APP_ERP_TOKEN`**.
+All outbound Frappe calls (`/api/resource/...`, `/api/method/mobile_app.api.v1.*`) use **only** **`ERP_TOKEN`** — no separate mobile-app env vars.
 
-See **`api-list-erp.md`** and `.env.example`.
+| This backend route | Frappe upstream (typical) |
+|--------------------|---------------------------|
+| `GET /api/v1/users/lookup`, `POST …/users/sync` | `mobile_app.api.v1.users_lookup` / `users_sync` |
+| `POST /api/v1/profiles/sync` | `mobile_app.api.v1.users_full_sync` |
+| Other DocType routes | `/api/resource/<DocType>/…` |
 
-| This backend | Frappe method path | Purpose |
-|--------------|---------------------|---------|
-| User read / sync fallbacks | `GET /api/method/mobile_app.api.v1.users_lookup` | Full user + child tables |
-| `POST /api/v1/users/sync` (preferred) | `POST …/mobile_app.api.v1.users_sync` | Upsert parent **Mobile App User** |
-| `POST /api/v1/profiles/sync` (preferred) | `POST …/mobile_app.api.v1.users_full_sync` | Upsert parent + **`profiles`** child rows (and optional other tabs) |
-| `POST /api/v1/users/profile-image` | `POST …/mobile_app.api.profile_image.upload_profile_image` | Binary photo (multipart; uses Frappe **API key**, see route) |
-| Legacy paths | `GET/POST /api/resource/<DocType>/…` | Fallback when V1 method fails |
-
-**Why `profiles/sync` used to return `ERP call failed: 404`:** the old implementation called **`/api/resource/Mobile App User Profile`** as a standalone DocType. In your desk UI, profile rows live on the **Mobile App User** form as the **`profiles` child table** (`Mobile App User Profile Item`). That Resource path may not exist or match — Frappe returns **404**. The fix is **`users_full_sync`** with a **`profiles`** array (same as Postman/curl on Frappe directly).
-
-**Still 404 after deploy?**
-
-1. **`ERP_TOKEN`** on Render must equal Frappe **`mobile_app_erp_token`** in `site_config.json` (not necessarily the same as a Desk API key). Prefer **`ERP_AUTH_SCHEME=bearer`** when that token is a bare secret string.
-2. Confirm on Frappe: **`bench --site <yoursite> console`** or Desk → check whitelisted method **`mobile_app.api.v1.users_full_sync`** exists (`bench migrate` after pulling `mobile_app`).
-3. Call Frappe directly: `POST {{ERP_BASE_URL}}/api/method/mobile_app.api.v1.users_full_sync` with **`X-ERP-Token`** — if that 404s, fix ERP before Node.
-
-**`AuthenticationError` in `validate_auth()` (before `require_app_token`):** Frappe needs a normal Desk **API key** on the request: **`Authorization: token api_key:api_secret`**. Set **`ERP_TOKEN`** to `key:secret` from Desk → **My Settings → API Access**, and set **`MOBILE_APP_ERP_TOKEN`** to **`mobile_app_erp_token`**. The backend sends both **`Authorization`** (Desk) and **`X-ERP-Token`** (mobile app).
+Configure **`ERP_BASE_URL`** and **`ERP_TOKEN`** so Postman-to-Frappe using the same key works when debugging.
 
 ---
 
@@ -190,7 +180,7 @@ curl -sS "http://localhost:3101/api/health"
   "service": "sriaas-backend-erp",
   "frappe": {
     "baseUrlConfigured": true,
-    "tokenConfigured": true,
+    "erpTokenConfigured": true,
     "appTokenConfigured": true,
     "doctypes": {
       "MOBILE_APP_USER": "Mobile App User",

@@ -8,10 +8,10 @@ function normalizeSecret(v) {
 }
 
 const ERP_BASE_URL = trim(process.env.ERP_BASE_URL || "").replace(/\/+$/, "");
+/** Frappe API key: `api_key:api_secret` — sent as `Authorization: token …` unless ERP_AUTH_SCHEME=bearer */
 const ERP_TOKEN = normalizeSecret(process.env.ERP_TOKEN || "");
-/** Same value as Frappe `site_config.json` → `mobile_app_erp_token`. If set, used for `mobile_app.api.v1.*` only. */
-const MOBILE_APP_ERP_TOKEN = normalizeSecret(process.env.MOBILE_APP_ERP_TOKEN || "");
 const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase();
+/** App / Postman → this Node API (`requireAppToken` on `/api/v1/*`). */
 const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
 const PORT = Number(process.env.PORT || 3101);
 
@@ -36,62 +36,21 @@ const DOCTYPE = {
 };
 
 /**
- * Frappe Resource API often uses `Authorization: token api_key:secret`.
- * **`mobile_app.api.v1.*`** (users_lookup, users_full_sync, …) expects the same secret as
- * **`site_config.json` → `mobile_app_erp_token`** via **`X-ERP-Token`** or **`Bearer`** — see api-list-erp.md.
- * We always send **X-ERP-Token** when `ERP_TOKEN` is set so V1 methods authenticate reliably.
+ * All outbound Frappe calls (`/api/resource/...`, `/api/method/...`) use **ERP_TOKEN** only:
+ * - **`token`** (default): `Authorization: token <client_id>:<client_secret>`
+ * - **`bearer`**: `Authorization: Bearer <ERP_TOKEN>`
  */
 function erpAuthHeader() {
   if (!ERP_TOKEN) return {};
-  const headers = { "X-ERP-Token": ERP_TOKEN };
   if (ERP_AUTH_SCHEME === "bearer") {
-    headers.Authorization = `Bearer ${ERP_TOKEN}`;
-  } else {
-    headers.Authorization = `token ${ERP_TOKEN}`;
+    return { Authorization: `Bearer ${ERP_TOKEN}` };
   }
-  return headers;
-}
-
-/**
- * Auth for Frappe `mobile_app.api.v1.*`.
- *
- * 1. **`require_app_token()`** reads **`X-ERP-Token`** → must match **`mobile_app_erp_token`** in `site_config.json`
- *    (use **`MOBILE_APP_ERP_TOKEN`**).
- * 2. Frappe **`validate_auth()`** runs first and expects a normal Desk credential:
- *    **`Authorization: token api_key:api_secret`** (same as **`ERP_TOKEN`** when it contains `:`).
- *
- * So when **`MOBILE_APP_ERP_TOKEN`** is set together with **`ERP_TOKEN`** = `key:secret`, we send both headers.
- * Bearer-only requests often fail with `validate_auth` → **AuthenticationError** before your method runs.
- */
-function erpAuthHeaderMobileV1() {
-  const mobile = (MOBILE_APP_ERP_TOKEN || "").trim();
-  const desk = (ERP_TOKEN || "").trim();
-
-  const headers = {};
-
-  const xErp = mobile || desk;
-  if (xErp) headers["X-ERP-Token"] = xErp;
-
-  if (desk.includes(":")) {
-    headers.Authorization = `token ${desk}`;
-  } else if (mobile) {
-    headers.Authorization = `Bearer ${mobile}`;
-  } else if (desk) {
-    headers.Authorization =
-      ERP_AUTH_SCHEME === "bearer" ? `Bearer ${desk}` : `token ${desk}`;
-  }
-
-  return headers;
-}
-
-function mobileAppV1TokenConfigured() {
-  return Boolean(MOBILE_APP_ERP_TOKEN || ERP_TOKEN);
+  return { Authorization: `token ${ERP_TOKEN}` };
 }
 
 module.exports = {
   ERP_BASE_URL,
   ERP_TOKEN,
-  MOBILE_APP_ERP_TOKEN,
   ERP_AUTH_SCHEME,
   APP_ERP_TOKEN,
   PORT,
@@ -99,6 +58,4 @@ module.exports = {
   SUPABASE_ANON_KEY,
   DOCTYPE,
   erpAuthHeader,
-  erpAuthHeaderMobileV1,
-  mobileAppV1TokenConfigured,
 };
