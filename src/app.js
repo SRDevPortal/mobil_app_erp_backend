@@ -6,6 +6,7 @@ const {
   ERP_TOKEN,
   DOCTYPE,
   APP_ERP_TOKEN,
+  MOBILE_APP_ERP_TOKEN,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
 } = require("./config");
@@ -40,6 +41,8 @@ function createApp() {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
         /** Node → Frappe (`Authorization: token client_id:client_secret`) */
         erpTokenConfigured: Boolean(ERP_TOKEN),
+        /** Node → Frappe for `mobile_app.api.v1.*` (`X-ERP-Token` = site `mobile_app_erp_token`) */
+        mobileAppErpTokenConfigured: Boolean(MOBILE_APP_ERP_TOKEN),
         /** App / Postman → Node (`X-ERP-Token` = APP_ERP_TOKEN) */
         appTokenConfigured: Boolean(APP_ERP_TOKEN),
         doctypes: DOCTYPE,

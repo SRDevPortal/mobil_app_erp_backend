@@ -61,14 +61,15 @@ The JSON error shape applies to **handled** routes and the global **500** error 
 
 ---
 
-## Auth model (two secrets)
+## Auth model
 
 | Direction | Env var | How it’s sent |
 |-----------|---------|----------------|
 | **App / Postman → this Node API** | **`APP_ERP_TOKEN`** | Header **`X-ERP-Token`** or **`Authorization: Bearer`** (see § Authentication below). |
-| **This Node API → Frappe** | **`ERP_TOKEN`** | **`Authorization: token <client_id>:<client_secret>`** (Frappe User API key). Optional **`ERP_AUTH_SCHEME=bearer`** for **`Bearer`** instead. |
+| **This Node API → Frappe (Desk user)** | **`ERP_TOKEN`** | **`Authorization: token <client_id>:<client_secret>`**. Optional **`ERP_AUTH_SCHEME=bearer`**. |
+| **This Node API → Frappe (`mobile_app.api.v1.*`)** | **`MOBILE_APP_ERP_TOKEN`** | Header **`X-ERP-Token`** — **must match** `mobile_app_erp_token` in Frappe **`site_config.json`**. Used by **`require_app_token()`** inside those methods; it is **not** the same as the Desk API key. |
 
-All outbound Frappe calls (`/api/resource/...`, `/api/method/mobile_app.api.v1.*`) use **only** **`ERP_TOKEN`** — no separate mobile-app env vars.
+If **`MOBILE_APP_ERP_TOKEN`** is unset, **`/api/method/mobile_app.api.v1.*`** calls can return **`Invalid or missing app token`** even when **`ERP_TOKEN`** is correct.
 
 | This backend route | Frappe upstream (typical) |
 |--------------------|---------------------------|
@@ -76,7 +77,7 @@ All outbound Frappe calls (`/api/resource/...`, `/api/method/mobile_app.api.v1.*
 | `POST /api/v1/profiles/sync` | `mobile_app.api.v1.users_full_sync` |
 | Other DocType routes | `/api/resource/<DocType>/…` |
 
-Configure **`ERP_BASE_URL`** and **`ERP_TOKEN`** so Postman-to-Frappe using the same key works when debugging.
+**Alternative:** change **`require_app_token()`** in the **`mobile_app`** Frappe app so it accepts only **`Authorization`** (API user) and drops the separate site token — then you would not need **`MOBILE_APP_ERP_TOKEN`** on Node (security tradeoff on your side).
 
 ---
 
@@ -181,6 +182,7 @@ curl -sS "http://localhost:3101/api/health"
   "frappe": {
     "baseUrlConfigured": true,
     "erpTokenConfigured": true,
+    "mobileAppErpTokenConfigured": true,
     "appTokenConfigured": true,
     "doctypes": {
       "MOBILE_APP_USER": "Mobile App User",

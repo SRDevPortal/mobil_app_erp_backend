@@ -13,6 +13,12 @@ const ERP_TOKEN = normalizeSecret(process.env.ERP_TOKEN || "");
 const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase();
 /** App / Postman → this Node API (`requireAppToken` on `/api/v1/*`). */
 const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
+/**
+ * Same value as `mobile_app_erp_token` in Frappe `site_config.json`.
+ * Sent as **X-ERP-Token** on Node→Frappe so `mobile_app.api.v1.*` passes `require_app_token()`.
+ * This is separate from **ERP_TOKEN** (Desk API key in **Authorization**).
+ */
+const MOBILE_APP_ERP_TOKEN = normalizeSecret(process.env.MOBILE_APP_ERP_TOKEN || "");
 const PORT = Number(process.env.PORT || 3101);
 
 /** Supabase project (for POST /api/auth/verify-supabase — validates user JWT like n8n). */
@@ -36,16 +42,23 @@ const DOCTYPE = {
 };
 
 /**
- * All outbound Frappe calls (`/api/resource/...`, `/api/method/...`) use **ERP_TOKEN** only:
- * - **`token`** (default): `Authorization: token <client_id>:<client_secret>`
- * - **`bearer`**: `Authorization: Bearer <ERP_TOKEN>`
+ * Outbound Frappe headers:
+ * - **Authorization** — Desk API user (**ERP_TOKEN**)
+ * - **X-ERP-Token** — optional; required by **mobile_app** `require_app_token()` when calling **`/api/method/mobile_app.api.v1.*`**
  */
 function erpAuthHeader() {
-  if (!ERP_TOKEN) return {};
-  if (ERP_AUTH_SCHEME === "bearer") {
-    return { Authorization: `Bearer ${ERP_TOKEN}` };
+  const headers = {};
+  if (ERP_TOKEN) {
+    if (ERP_AUTH_SCHEME === "bearer") {
+      headers.Authorization = `Bearer ${ERP_TOKEN}`;
+    } else {
+      headers.Authorization = `token ${ERP_TOKEN}`;
+    }
   }
-  return { Authorization: `token ${ERP_TOKEN}` };
+  if (MOBILE_APP_ERP_TOKEN) {
+    headers["X-ERP-Token"] = MOBILE_APP_ERP_TOKEN;
+  }
+  return headers;
 }
 
 module.exports = {
@@ -53,6 +66,7 @@ module.exports = {
   ERP_TOKEN,
   ERP_AUTH_SCHEME,
   APP_ERP_TOKEN,
+  MOBILE_APP_ERP_TOKEN,
   PORT,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
