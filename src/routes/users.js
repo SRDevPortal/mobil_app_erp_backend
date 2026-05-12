@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { DOCTYPE, ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
-const { findMobileAppUser } = require("../services/userService");
+const { findMobileAppUser, enrichMobileAppUserForApi } = require("../services/userService");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
 const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity } = require("../normalize");
 
@@ -30,9 +30,10 @@ router.get("/lookup", async (req, res) => {
   try {
     const user = await findMobileAppUser(req.query || {}, {}, {});
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    const enriched = enrichMobileAppUserForApi(user);
     return res.json({
       success: true,
-      data: attachCustomerIdentity(user, user.external_id),
+      data: attachCustomerIdentity(enriched, enriched.external_id),
     });
   } catch (e) {
     return res.status(e.status || 500).json({ success: false, message: e.message });
