@@ -53,17 +53,35 @@ function erpAuthHeader() {
 }
 
 /**
- * Auth for Frappe `mobile_app.api.v1.*` — `require_app_token()` checks **`mobile_app_erp_token`**.
- * Use **only** `X-ERP-Token` + **`Authorization: Bearer`** (do not send `Authorization: token api_key:secret`
- * here — that breaks validation when `ERP_TOKEN` is a Desk API key).
+ * Auth for Frappe `mobile_app.api.v1.*`.
+ *
+ * 1. **`require_app_token()`** reads **`X-ERP-Token`** → must match **`mobile_app_erp_token`** in `site_config.json`
+ *    (use **`MOBILE_APP_ERP_TOKEN`**).
+ * 2. Frappe **`validate_auth()`** runs first and expects a normal Desk credential:
+ *    **`Authorization: token api_key:api_secret`** (same as **`ERP_TOKEN`** when it contains `:`).
+ *
+ * So when **`MOBILE_APP_ERP_TOKEN`** is set together with **`ERP_TOKEN`** = `key:secret`, we send both headers.
+ * Bearer-only requests often fail with `validate_auth` → **AuthenticationError** before your method runs.
  */
 function erpAuthHeaderMobileV1() {
-  const token = (MOBILE_APP_ERP_TOKEN || ERP_TOKEN || "").trim();
-  if (!token) return {};
-  return {
-    "X-ERP-Token": token,
-    Authorization: `Bearer ${token}`,
-  };
+  const mobile = (MOBILE_APP_ERP_TOKEN || "").trim();
+  const desk = (ERP_TOKEN || "").trim();
+
+  const headers = {};
+
+  const xErp = mobile || desk;
+  if (xErp) headers["X-ERP-Token"] = xErp;
+
+  if (desk.includes(":")) {
+    headers.Authorization = `token ${desk}`;
+  } else if (mobile) {
+    headers.Authorization = `Bearer ${mobile}`;
+  } else if (desk) {
+    headers.Authorization =
+      ERP_AUTH_SCHEME === "bearer" ? `Bearer ${desk}` : `token ${desk}`;
+  }
+
+  return headers;
 }
 
 function mobileAppV1TokenConfigured() {

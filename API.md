@@ -86,6 +86,8 @@ See **`api-list-erp.md`** and `.env.example`.
 2. Confirm on Frappe: **`bench --site <yoursite> console`** or Desk → check whitelisted method **`mobile_app.api.v1.users_full_sync`** exists (`bench migrate` after pulling `mobile_app`).
 3. Call Frappe directly: `POST {{ERP_BASE_URL}}/api/method/mobile_app.api.v1.users_full_sync` with **`X-ERP-Token`** — if that 404s, fix ERP before Node.
 
+**`AuthenticationError` in `validate_auth()` (before `require_app_token`):** Frappe needs a normal Desk **API key** on the request: **`Authorization: token api_key:api_secret`**. Set **`ERP_TOKEN`** to `key:secret` from Desk → **My Settings → API Access**, and set **`MOBILE_APP_ERP_TOKEN`** to **`mobile_app_erp_token`**. The backend sends both **`Authorization`** (Desk) and **`X-ERP-Token`** (mobile app).
+
 ---
 
 ## Authentication
