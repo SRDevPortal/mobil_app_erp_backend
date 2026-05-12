@@ -123,6 +123,45 @@ function mapUserToFrappe(body = {}) {
   return stripUndefined(doc);
 }
 
+/** Row shape for `mobile_app.api.v1.users_full_sync` → **`profiles`** child table (not standalone DocType). */
+function mapProfileChildRowForFullSync(row = {}) {
+  const profile_name =
+    row.profile_name != null ? String(row.profile_name).trim() : pickName(row) || undefined;
+  const pc =
+    row.profile_complete === true ? 1 : row.profile_complete === false ? 0 : row.profile_complete;
+  const fs =
+    row.force_profile_setup === true ? 1 : row.force_profile_setup === false ? 0 : row.force_profile_setup;
+  const pdj = row.profile_data_json;
+  const numOrUndef = (v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  return stripUndefined({
+    profile_name: profile_name || undefined,
+    phone: pickPhone(row) || undefined,
+    gender: pickGender(row) || undefined,
+    age: numOrUndef(row.age),
+    height: numOrUndef(row.height),
+    weight: numOrUndef(row.weight),
+    email: row.email != null ? String(row.email).trim() : undefined,
+    profile_complete: pc !== undefined && pc !== "" ? pc : undefined,
+    force_profile_setup: fs !== undefined && fs !== "" ? fs : undefined,
+    profile_data_json:
+      pdj !== undefined ? (typeof pdj === "string" ? pdj : frappeJsonField(pdj)) : undefined,
+    membership_type: row.membership_type,
+    doctor_assigned: row.doctor_assigned,
+    patient_id: row.patient_id,
+  });
+}
+
+/** Builds `profiles` array for `users_full_sync` from either `{ profiles: [...] }` or legacy flat body. */
+function buildProfilesPayloadForFullSync(body = {}) {
+  const rows =
+    Array.isArray(body.profiles) && body.profiles.length > 0 ? body.profiles : [body];
+  return rows.map(mapProfileChildRowForFullSync);
+}
+
 function mapProfileToFrappe(body = {}, userLinkName) {
   const profile_name = body.profile_name != null ? String(body.profile_name).trim() : pickName(body);
   const doc = {
@@ -373,6 +412,8 @@ module.exports = {
   frappeJsonField,
   mapUserToFrappe,
   mapProfileToFrappe,
+  mapProfileChildRowForFullSync,
+  buildProfilesPayloadForFullSync,
   mapDiseaseSelectionToFrappe,
   mapHealthEntryToFrappe,
   mapSessionToFrappe,

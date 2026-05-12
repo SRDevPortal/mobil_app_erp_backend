@@ -61,6 +61,22 @@ The JSON error shape applies to **handled** routes and the global **500** error 
 
 ---
 
+## Frappe ERP (`mobile_app`) — upstream methods this service calls
+
+Your Node API is a **thin proxy**. Configure **`ERP_BASE_URL`** and **`ERP_TOKEN`** / **`ERP_AUTH_SCHEME`** so they match Frappe **`mobile_app_erp_token`** (see `site_config.json`) — same secret as in **`api-list-erp.md`**.
+
+| This backend | Frappe method path | Purpose |
+|--------------|---------------------|---------|
+| User read / sync fallbacks | `GET /api/method/mobile_app.api.v1.users_lookup` | Full user + child tables |
+| `POST /api/v1/users/sync` (preferred) | `POST …/mobile_app.api.v1.users_sync` | Upsert parent **Mobile App User** |
+| `POST /api/v1/profiles/sync` (preferred) | `POST …/mobile_app.api.v1.users_full_sync` | Upsert parent + **`profiles`** child rows (and optional other tabs) |
+| `POST /api/v1/users/profile-image` | `POST …/mobile_app.api.profile_image.upload_profile_image` | Binary photo (multipart; uses Frappe **API key**, see route) |
+| Legacy paths | `GET/POST /api/resource/<DocType>/…` | Fallback when V1 method fails |
+
+**Why `profiles/sync` used to return `ERP call failed: 404`:** the old implementation called **`/api/resource/Mobile App User Profile`** as a standalone DocType. In your desk UI, profile rows live on the **Mobile App User** form as the **`profiles` child table** (`Mobile App User Profile Item`). That Resource path may not exist or match — Frappe returns **404**. The fix is **`users_full_sync`** with a **`profiles`** array (same as Postman/curl on Frappe directly).
+
+---
+
 ## Authentication
 
 - **`GET /api/health`** — no token.
@@ -297,37 +313,49 @@ curl -sS -X POST "http://localhost:3101/api/v1/users/sessions/sync" \
 
 ---
 
-## 5) Upsert Mobile App User Profile
+## 5) Upsert Mobile App User Profile (child table `profiles`)
 
 **`POST /api/v1/profiles/sync`** → **200** or **404**
 
-Body must include user lookup fields (same as lookup).
+Proxies to Frappe **`mobile_app.api.v1.users_full_sync`** with a **`profiles`** array (replaces child rows for that table when present — see `api-list-erp.md`).
+
+**Required:** **`external_id`** (same UUID as Supabase user).
+
+**Preferred body** — array of profile row(s), matching desk **Profiles** tab:
 
 ```bash
 curl -sS -X POST "http://localhost:3101/api/v1/profiles/sync" \
   -H "Content-Type: application/json" \
   -H "X-ERP-Token: YOUR_APP_TOKEN" \
-  -d "{\"external_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"profile_name\":\"Test Patient\",\"phone\":\"+919876543210\",\"gender\":\"male\",\"age\":40,\"height\":170,\"weight\":72,\"email\":\"patient@example.com\",\"profile_complete\":true,\"force_profile_setup\":false}"
+  -d "{\"external_id\":\"17a2f5c0-ab69-419c-aed6-43c7e2eedfb0\",\"profiles\":[{\"profile_name\":\"Primary\",\"phone\":\"9466073244\",\"email\":\"you@example.com\",\"gender\":\"Male\",\"age\":35,\"height\":170,\"weight\":72,\"profile_complete\":1,\"force_profile_setup\":0,\"profile_data_json\":{}}]}"
 ```
 
-**Example 200 response:**
+**Backward compatible:** the same fields may be sent **flat** on the root object (no `profiles` key); the server wraps them as a single row.
+
+**Example 200 response:** `data` is the Frappe **`users_full_sync`** payload (full **Mobile App User** document shape, including **`profiles`**, plus **`profile_image_url`** when the app adds it).
 
 ```json
 {
   "success": true,
   "data": {
-    "name": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440000",
-    "profile_name": "Test Patient",
-    "gender": "Male",
-    "age": 40,
-    "height": 170.0,
-    "weight": 72.0,
-    "profile_complete": 1,
-    "modified": "2026-05-12 10:22:00.000000"
+    "external_id": "17a2f5c0-ab69-419c-aed6-43c7e2eedfb0",
+    "profiles": [
+      {
+        "profile_name": "Primary",
+        "phone": "9466073244",
+        "gender": "Male",
+        "age": 35,
+        "height": 170,
+        "weight": 72,
+        "profile_complete": 1,
+        "force_profile_setup": 0
+      }
+    ]
   }
 }
 ```
+
+If **`users_full_sync`** is unavailable, the server falls back to **`/api/resource/...`** upsert (requires a matching standalone DocType name in env).
 
 ---
 
