@@ -9,12 +9,12 @@ Set `PORT` in `.env` if you use another port.
 
 ## Scope — is this the full API (A–Z)?
 
-**Yes, for this service.** Every HTTP route registered in `src/app.js` and `src/routes/*.js` is documented in this file. There are exactly **15** endpoints:
+**Yes, for this service.** Every HTTP route registered in `src/app.js` and `src/routes/*.js` is documented in this file. There are exactly **16** endpoints:
 
 | # | Kind | Count |
 |---|------|------:|
 | 1 | Public (no app token) | 2 |
-| 2 | Protected (`APP_ERP_TOKEN` required) | 13 |
+| 2 | Protected (`APP_ERP_TOKEN` required) | 14 |
 
 There is **no** `/api/v2`, **no** WebSocket/Socket.IO, **no** GraphQL, and **no** extra files under `backend-erp` that expose other HTTP routes.
 
@@ -35,6 +35,7 @@ There is **no** `/api/v2`, **no** WebSocket/Socket.IO, **no** GraphQL, and **no*
 | `POST` | `/api/v1/support-tickets` |
 | `GET` | `/api/v1/users/lookup` |
 | `POST` | `/api/v1/users/sessions/sync` |
+| `POST` | `/api/v1/users/profile-image` |
 | `POST` | `/api/v1/users/sync` |
 | `POST` | `/api/v1/webhook-events` |
 
