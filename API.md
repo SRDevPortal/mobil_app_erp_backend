@@ -9,11 +9,11 @@ Set `PORT` in `.env` if you use another port.
 
 ## Scope — is this the full API (A–Z)?
 
-**Yes, for this service.** Every HTTP route registered in `src/app.js` and `src/routes/*.js` is documented in this file. There are exactly **14** endpoints:
+**Yes, for this service.** Every HTTP route registered in `src/app.js` and `src/routes/*.js` is documented in this file. There are exactly **15** endpoints:
 
 | # | Kind | Count |
 |---|------|------:|
-| 1 | Public (no app token) | 1 |
+| 1 | Public (no app token) | 2 |
 | 2 | Protected (`APP_ERP_TOKEN` required) | 13 |
 
 There is **no** `/api/v2`, **no** WebSocket/Socket.IO, **no** GraphQL, and **no** extra files under `backend-erp` that expose other HTTP routes.
@@ -23,6 +23,7 @@ There is **no** `/api/v2`, **no** WebSocket/Socket.IO, **no** GraphQL, and **no*
 | Method | Path |
 |--------|------|
 | `GET` | `/api/health` |
+| `POST` | `/api/auth/verify-supabase` |
 | `POST` | `/api/v1/appointments` |
 | `POST` | `/api/v1/disease-selections` |
 | `POST` | `/api/v1/diseases/sync` |
@@ -44,7 +45,7 @@ If you need any of the following, they must be **added in code** first; they are
 - `GET` list / pagination for health entries, notifications, tickets, etc.
 - `PUT` / `PATCH` / `DELETE` for arbitrary DocTypes
 - File upload multipart routes (this API only forwards JSON metadata to Frappe)
-- OAuth, JWT, or session cookies (only `X-ERP-Token` / Bearer for this layer)
+- OAuth for third-party providers — Supabase sessions are validated separately via **`POST /api/auth/verify-supabase`** (no `APP_ERP_TOKEN`; requires server `SUPABASE_*` env vars)
 
 ### Unknown URL behavior
 
@@ -62,11 +63,27 @@ The JSON error shape applies to **handled** routes and the global **500** error 
 ## Authentication
 
 - **`GET /api/health`** — no token.
+- **`POST /api/auth/verify-supabase`** — no `APP_ERP_TOKEN`. Send only the user’s **Supabase access token** in JSON (same validation flow as n8n calling `GET .../auth/v1/user`). Server must set **`SUPABASE_URL`** and **`SUPABASE_ANON_KEY`**. On success, upserts **Mobile App User** with **`external_id` = Supabase user UUID** (the stable key used across DocTypes). Optional JSON **`phone`** fills `phone` when Supabase does not return it yet (email-OTP-only flows).
 - **All `/api/v1/*` routes** — send your `APP_ERP_TOKEN` using **one** of:
   - Header: `X-ERP-Token: <APP_ERP_TOKEN>`
   - Header: `Authorization: Bearer <APP_ERP_TOKEN>`
 
 Replace `YOUR_APP_TOKEN` in the curl examples below.
+
+### `POST /api/auth/verify-supabase` (public)
+
+**Body (JSON):**
+
+| Field | Required | Notes |
+|--------|----------|--------|
+| `supabaseAccessToken` | Yes | Current Supabase session access JWT (alias: `supabase_access_token`, `access_token`) |
+| `phone` | No | Normalized into Mobile App User **`phone`** if missing from Supabase user / metadata |
+
+**200 response:** `data` includes **`external_id`** (canonical unique customer id in Frappe) and **`customer_id`** (same value). Also `supabase_user_id`, `mobile_app_user_name`, `email`, `phone`, `full_name`.
+
+**401:** Invalid or expired Supabase session.
+
+**503:** `SUPABASE_URL` / `SUPABASE_ANON_KEY` not set on the server.
 
 ---
 
@@ -92,6 +109,8 @@ Replace `YOUR_APP_TOKEN` in the curl examples below.
 ```
 
 `data` is the Frappe document returned after save (field names match your DocTypes). `name` is the Frappe document id.
+
+**Customer identity:** **Mobile App User** stores the unique app customer id in **`external_id`** (same UUID as Supabase `auth.users.id`). Responses from **`POST /api/v1/users/sync`**, **`GET /api/v1/users/lookup`**, and **`POST /api/auth/verify-supabase`** also include **`customer_id`** (= `external_id`). Incoming JSON may use **`customer_id`**, **`mobile_user_id`**, or **`erp_customer_id`** wherever **`external_id`** is accepted.
 
 ### Error body shape
 

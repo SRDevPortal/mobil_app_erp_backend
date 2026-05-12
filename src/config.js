@@ -13,6 +13,10 @@ const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase
 const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
 const PORT = Number(process.env.PORT || 3101);
 
+/** Supabase project (for POST /api/auth/verify-supabase — validates user JWT like n8n). */
+const SUPABASE_URL = trim(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+const SUPABASE_ANON_KEY = normalizeSecret(process.env.SUPABASE_ANON_KEY || "");
+
 const DOCTYPE = {
   MOBILE_APP_USER: trim(process.env.DOCTYPE_MOBILE_APP_USER || "Mobile App User"),
   MOBILE_APP_USER_SESSION: trim(process.env.DOCTYPE_MOBILE_APP_USER_SESSION || "Mobile App User Session"),
@@ -41,6 +45,8 @@ module.exports = {
   ERP_AUTH_SCHEME,
   APP_ERP_TOKEN,
   PORT,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
   DOCTYPE,
   erpAuthHeader,
 };

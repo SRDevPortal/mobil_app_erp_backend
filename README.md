@@ -63,7 +63,7 @@ npm run dev
 1. Push this repo to GitHub (this folder is the **root** of `mobil_app_erp_backend`).
 2. In [Render](https://dashboard.render.com): **New** → **Web Service** → connect the repo.
 3. **Runtime:** Node; **Build:** `npm install`; **Start:** `npm start`.
-4. **Environment:** copy variables from `.env.example` into Render **Environment** (set `APP_ERP_TOKEN`, `ERP_BASE_URL`, `ERP_TOKEN`, etc.). Render injects **`PORT`** automatically — do not hardcode it.
+4. **Environment:** copy variables from `.env.example` into Render **Environment** (`APP_ERP_TOKEN`, `ERP_*`, **`SUPABASE_URL`**, **`SUPABASE_ANON_KEY`** for `/api/auth/verify-supabase`, same values as the Flutter app’s Supabase project). Render injects **`PORT`** automatically — do not hardcode it.
 
 After deploy, use your Render HTTPS URL as `BACKEND_ERP_BASE_URL` in the Flutter app (`flutter_erp.env` or `--dart-define`).
 

@@ -1,6 +1,14 @@
 const express = require("express");
 const cors = require("cors");
-const { PORT, ERP_BASE_URL, ERP_TOKEN, DOCTYPE, APP_ERP_TOKEN } = require("./config");
+const {
+  PORT,
+  ERP_BASE_URL,
+  ERP_TOKEN,
+  DOCTYPE,
+  APP_ERP_TOKEN,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+} = require("./config");
 const { requireAppToken } = require("./middleware/requireAppToken");
 
 const usersRouter = require("./routes/users");
@@ -14,11 +22,15 @@ const appointmentsRouter = require("./routes/appointments");
 const notificationsRouter = require("./routes/notifications");
 const supportTicketsRouter = require("./routes/supportTickets");
 const webhookEventsRouter = require("./routes/webhookEvents");
+const authRouter = require("./routes/auth");
 
 function createApp() {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  /** Supabase JWT verification + Mobile App User upsert (no APP_ERP_TOKEN). */
+  app.use("/api/auth", authRouter);
 
   app.get("/api/health", (_req, res) => {
     res.json({
@@ -29,6 +41,9 @@ function createApp() {
         tokenConfigured: Boolean(ERP_TOKEN),
         appTokenConfigured: Boolean(APP_ERP_TOKEN),
         doctypes: DOCTYPE,
+      },
+      supabase: {
+        configured: Boolean(SUPABASE_URL && SUPABASE_ANON_KEY),
       },
     });
   });

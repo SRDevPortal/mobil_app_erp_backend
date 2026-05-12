@@ -12,7 +12,14 @@ function pickName(body) {
 }
 
 function pickPhone(body) {
-  const p = body.phone ?? body.mobile ?? body.phone_number ?? body.phonenumber;
+  const p =
+    body.phone ??
+    body.mobile ??
+    body.phone_number ??
+    body.phonenumber ??
+    body.mobile_no ??
+    body.mobileNo ??
+    body.phoneNumber;
   return p != null ? String(p).trim() : "";
 }
 
@@ -26,9 +33,30 @@ function pickGender(body) {
   return raw;
 }
 
+/**
+ * Canonical unique customer id for Mobile App User → Frappe field **`external_id`**.
+ * Aliases in JSON map to the same field (`customer_id`, `mobile_user_id`, etc.).
+ */
 function pickExternalId(body) {
-  const id = body.external_id ?? body.id ?? body.customer_id;
+  const id =
+    body.external_id ??
+    body.id ??
+    body.customer_id ??
+    body.mobile_user_id ??
+    body.erp_customer_id;
   return id != null ? String(id).trim() : "";
+}
+
+/** Adds `customer_id` (same value) next to `external_id` on API responses for clarity. */
+function attachCustomerIdentity(doc = {}, externalId) {
+  const ext =
+    externalId != null && String(externalId).trim() !== ""
+      ? String(externalId).trim()
+      : doc.external_id != null
+        ? String(doc.external_id).trim()
+        : "";
+  if (!ext) return { ...doc };
+  return { ...doc, external_id: ext, customer_id: ext };
 }
 
 /** Session row id (avoid conflating with user `id` on the same payload). */
@@ -333,6 +361,7 @@ function stripUndefined(obj) {
 
 module.exports = {
   pickExternalId,
+  attachCustomerIdentity,
   pickSessionExternalId,
   pickName,
   pickPhone,
