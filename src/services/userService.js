@@ -1,6 +1,19 @@
 const { DOCTYPE, ERP_BASE_URL } = require("../config");
-const { erpGetList } = require("../frappeClient");
+const { erpGetList, erpGetDoc } = require("../frappeClient");
 const { pickExternalId } = require("../normalize");
+
+/** Fields safe for Frappe `get_list` on Mobile App User (avoid columns not exposed to list query). */
+const MOBILE_APP_USER_LIST_FIELDS = [
+  "name",
+  "external_id",
+  "supabase_user_id",
+  "email",
+  "phone",
+  "full_name",
+  "modified",
+  "first_name",
+  "last_name",
+];
 
 /** Turn relative `/files/...` paths into absolute URLs for the Flutter app. */
 function absoluteErpAssetUrl(value) {
@@ -56,21 +69,29 @@ async function findMobileAppUser(body = {}, params = {}, query = {}) {
   if (!filters) return null;
   const rows = await erpGetList(DOCTYPE.MOBILE_APP_USER, {
     filters,
-    fields: [
-      "name",
-      "external_id",
-      "supabase_user_id",
-      "email",
-      "phone",
-      "full_name",
-      "modified",
-      "avatar_url",
-      "profile_image_url",
-      "image",
-    ],
+    fields: MOBILE_APP_USER_LIST_FIELDS,
     limit: 1,
   });
   return rows[0] || null;
+}
+
+/**
+ * Resolves user for API responses: safe list row + full document merge (image / URL fields often
+ * fail get_list with "Field not permitted in query" on custom sites).
+ */
+async function getMobileAppUserForApi(body = {}, params = {}, query = {}) {
+  const row = await findMobileAppUser(body, params, query);
+  if (!row?.name) return null;
+  let merged = { ...row };
+  try {
+    const doc = await erpGetDoc(DOCTYPE.MOBILE_APP_USER, row.name);
+    if (doc && typeof doc === "object") {
+      merged = { ...merged, ...doc };
+    }
+  } catch (e) {
+    console.warn("[userService] erpGetDoc Mobile App User failed:", e.message);
+  }
+  return enrichMobileAppUserForApi(merged);
 }
 
 /**
@@ -96,6 +117,7 @@ async function resolveUserMiddleware(req, res, next) {
 
 module.exports = {
   findMobileAppUser,
+  getMobileAppUserForApi,
   enrichMobileAppUserForApi,
   resolveUserMiddleware,
   userLookupFilters,

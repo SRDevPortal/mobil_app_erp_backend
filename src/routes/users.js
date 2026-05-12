@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { DOCTYPE, ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
-const { findMobileAppUser, enrichMobileAppUserForApi } = require("../services/userService");
+const { findMobileAppUser, getMobileAppUserForApi } = require("../services/userService");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
 const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity } = require("../normalize");
 
@@ -28,9 +28,8 @@ router.post("/sync", async (req, res) => {
 
 router.get("/lookup", async (req, res) => {
   try {
-    const user = await findMobileAppUser(req.query || {}, {}, {});
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    const enriched = enrichMobileAppUserForApi(user);
+    const enriched = await getMobileAppUserForApi(req.query || {}, {}, {});
+    if (!enriched) return res.status(404).json({ success: false, message: "User not found" });
     return res.json({
       success: true,
       data: attachCustomerIdentity(enriched, enriched.external_id),
@@ -45,10 +44,9 @@ router.get("/lookup", async (req, res) => {
  */
 router.get("/context", async (req, res) => {
   try {
-    const user = await findMobileAppUser(req.query || {}, {}, {});
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    const enrichedUser = enrichMobileAppUserForApi(user);
-    const userLinkName = user.name;
+    const enrichedUser = await getMobileAppUserForApi(req.query || {}, {}, {});
+    if (!enrichedUser) return res.status(404).json({ success: false, message: "User not found" });
+    const userLinkName = enrichedUser.name;
 
     const profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
       filters: [["user_id", "=", userLinkName]],
