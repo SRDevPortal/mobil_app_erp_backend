@@ -1,9 +1,7 @@
 const express = require("express");
-const { DOCTYPE } = require("../config");
-const { erpCreate, erpUpdate, erpGetList, erpCallMethod } = require("../frappeClient");
-const { findMobileAppUser, unwrapMobileAppV1Message } = require("../services/userService");
+const { erpCallMethod } = require("../frappeClient");
+const { unwrapMobileAppV1Message } = require("../services/userService");
 const {
-  mapProfileToFrappe,
   pickExternalId,
   pickPhone,
   buildProfilesPayloadForFullSync,
@@ -20,11 +18,13 @@ function stripRootUndefined(obj) {
 }
 
 /**
- * Upserts profile row(s) on **Mobile App User** via Frappe `mobile_app.api.v1.users_full_sync`
- * (`profiles` child table). Falls back to Resource API only if V1 is unavailable.
+ * Upserts profile row(s) via Frappe **`mobile_app.api.v1.users_full_sync`** (`profiles` child table).
  *
- * Prefer body shape:
- * `{ "external_id": "...", "profiles": [ { profile_name, phone, email, ... } ] }`
+ * There is **no** fallback to `/api/resource/Mobile App User Profile`: on many benches profile rows
+ * exist only as child items under **Mobile App User**, so that Resource route returns **404**.
+ *
+ * Body: `{ "external_id": "...", "profiles": [ { profile_name, phone, ... } ] }`
+ * or legacy flat fields on the root object (wrapped into one profile row).
  */
 router.post("/sync", async (req, res) => {
   try {
@@ -39,8 +39,9 @@ router.post("/sync", async (req, res) => {
 
     const profiles = buildProfilesPayloadForFullSync(body);
 
+    let parsed;
     try {
-      const parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
+      parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
         method: "POST",
         body: stripRootUndefined({
           external_id,
@@ -51,35 +52,27 @@ router.post("/sync", async (req, res) => {
           profiles,
         }),
       });
-      const data = unwrapMobileAppV1Message(parsed);
-      if (data && typeof data === "object") {
-        return res.json({ success: true, data });
-      }
     } catch (e) {
-      console.warn("[profiles/sync] users_full_sync failed, legacy fallback:", e.message);
-    }
-
-    const user = await findMobileAppUser(body, {}, {});
-    if (!user?.name) {
-      return res.status(404).json({
+      const status = e.status >= 400 && e.status < 600 ? e.status : 502;
+      return res.status(status).json({
         success: false,
-        message:
-          "Mobile App User not found. Sync user first (POST /api/v1/users/sync) or fix ERP_BASE_URL / ERP_TOKEN.",
+        message: e.message || "users_full_sync failed",
+        frappePath: e.frappePath,
+        detail: e.payload,
       });
     }
 
-    const flat =
-      Array.isArray(body.profiles) && body.profiles.length ? body.profiles[0] : body;
-    const doc = mapProfileToFrappe(flat, user.name);
-    const rows = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
-      filters: [["user_id", "=", user.name]],
-      fields: ["name"],
-      limit: 1,
+    const data = unwrapMobileAppV1Message(parsed);
+    if (data && typeof data === "object") {
+      return res.json({ success: true, data });
+    }
+
+    return res.status(502).json({
+      success: false,
+      message:
+        "Frappe returned 200 but users_full_sync payload could not be parsed (expected message.success + message.data).",
+      raw: parsed,
     });
-    const saved = rows[0]?.name
-      ? await erpUpdate(DOCTYPE.MOBILE_APP_USER_PROFILE, rows[0].name, doc)
-      : await erpCreate(DOCTYPE.MOBILE_APP_USER_PROFILE, doc);
-    return res.json({ success: true, data: saved });
   } catch (e) {
     return res.status(e.status || 500).json({ success: false, message: e.message });
   }

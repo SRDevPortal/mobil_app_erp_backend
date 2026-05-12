@@ -361,7 +361,7 @@ curl -sS -X POST "http://localhost:3101/api/v1/profiles/sync" \
 }
 ```
 
-If **`users_full_sync`** is unavailable, the server falls back to **`/api/resource/...`** upsert (requires a matching standalone DocType name in env).
+**Note:** There is **no** Resource API fallback for profile rows. Many sites only store profiles as the **`profiles`** child table on **Mobile App User**; calling **`/api/resource/Mobile App User Profile`** then returns **404**. Fix Frappe **`users_full_sync`** / token instead.
 
 ---
 
