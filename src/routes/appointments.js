@@ -37,7 +37,7 @@ router.post("/", async (req, res) => {
     if (!external_id) external_id = crypto.randomUUID();
 
     const rowBody = { ...body, external_id };
-    const newRow = mapAppointmentChildRowForFullSync(rowBody);
+    const newRow = mapAppointmentChildRowForFullSync(rowBody, parentExternalId);
     if (!newRow?.appointment_external_id) {
       return res.status(400).json({ success: false, message: "appointment_external_id could not be set" });
     }

@@ -87,6 +87,48 @@ function nowFrappeDatetime() {
   return toFrappeDatetime(new Date());
 }
 
+/** Frappe **Date** column (`YYYY-MM-DD`). */
+function toFrappeDateOnly(value) {
+  if (value == null || value === "") return undefined;
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString().slice(0, 10);
+}
+
+/** Frappe **Time** column (`HH:mm:ss`). */
+function toFrappeTimeOnly(value) {
+  if (value == null || value === "") return undefined;
+  if (typeof value === "string") {
+    const s = value.trim();
+    const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (m) {
+      const hh = String(Number(m[1])).padStart(2, "0");
+      const mm = m[2];
+      const ss = (m[3] ?? "00").padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    }
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return undefined;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function buildAppointmentPageUrlDisease(body = {}) {
+  const direct = body.page_url_disease != null ? String(body.page_url_disease).trim() : "";
+  if (direct) return direct;
+  const page = body.page_url != null ? String(body.page_url).trim() : "";
+  const disease = body.disease_name != null ? String(body.disease_name).trim() : "";
+  if (page && disease) return `${page} | ${disease}`;
+  return page || disease || undefined;
+}
+
 /**
  * DocType JSON / Long Text fields: Frappe may reject raw lists/objects from the REST API
  * ("Value for X cannot be a list"). Send a JSON string instead.
@@ -298,33 +340,79 @@ function pickAppointmentDatetime(body = {}) {
 /**
  * Row shape for `mobile_app.api.v1.users_full_sync` → **`appointments`** child table
  * (`Mobile App Appointment Item`), not standalone **Mobile App Appointment**.
+ *
+ * @param {Record<string, unknown>} body — appointment payload (includes **`external_id`** for the row).
+ * @param {string} [parentUserExternalId] — Mobile App User **`external_id`** when **`user_id`** omitted.
  */
-function mapAppointmentChildRowForFullSync(body = {}) {
+function mapAppointmentChildRowForFullSync(body = {}, parentUserExternalId) {
   const appointment_external_id = pickExternalId(body) || undefined;
+  const submission_timestamp =
+    body.submission_timestamp != null
+      ? toFrappeDatetime(body.submission_timestamp)
+      : body.created_at != null
+        ? toFrappeDatetime(body.created_at)
+        : nowFrappeDatetime();
+
+  let appointment_date = toFrappeDateOnly(body.appointment_date);
+  let appointment_time = toFrappeTimeOnly(body.appointment_time);
+  if (!appointment_date && body.scheduled_at) appointment_date = toFrappeDateOnly(body.scheduled_at);
+  if (!appointment_time && body.scheduled_at) appointment_time = toFrappeTimeOnly(body.scheduled_at);
+
+  const uid =
+    body.user_id != null && String(body.user_id).trim() !== ""
+      ? String(body.user_id).trim()
+      : parentUserExternalId != null && String(parentUserExternalId).trim() !== ""
+        ? String(parentUserExternalId).trim()
+        : undefined;
+
   const legacyForPayload = stripUndefined({
-    patient_name: body.patient_name,
-    patient_email: body.patient_email,
-    patient_phone: body.patient_phone,
-    appointment_for: body.appointment_for,
-    appointment_type: body.appointment_type,
-    appointment_date: body.appointment_date,
-    appointment_time: body.appointment_time,
-    scheduled_at: body.scheduled_at,
     doctor_id: body.doctor_id,
-    disease_name: body.disease_name,
-    page_url: body.page_url,
+    scheduled_at: body.scheduled_at,
     is_removed_by_user: body.is_removed_by_user,
-    created_at: body.created_at,
     updated_at: body.updated_at,
+    appointment_datetime_legacy: pickAppointmentDatetime(body),
   });
   const payload_json =
     Object.keys(legacyForPayload).length > 0 ? frappeJsonField(legacyForPayload) : undefined;
+
+  const patient_email = body.patient_email != null ? String(body.patient_email).trim() : "";
+  const root_email = body.email != null ? String(body.email).trim() : "";
+  const email = root_email || patient_email || undefined;
+
   return stripUndefined({
     appointment_external_id,
-    doctor_name: body.doctor_name != null ? String(body.doctor_name).trim() : undefined,
     booking_id: body.booking_id != null ? String(body.booking_id).trim() : undefined,
-    status: body.status != null && String(body.status).trim() !== "" ? String(body.status).trim() : "pending",
-    appointment_datetime: pickAppointmentDatetime(body),
+    user_id: uid,
+    submission_timestamp,
+    appointment_date,
+    appointment_time,
+    doctor_name: body.doctor_name != null ? String(body.doctor_name).trim() : undefined,
+    patient_name: body.patient_name != null ? String(body.patient_name).trim() : undefined,
+    mobile_number: pickPhone(body) || (body.mobile_number != null ? String(body.mobile_number).trim() : undefined),
+    email,
+    consultation_type:
+      body.consultation_type != null && String(body.consultation_type).trim() !== ""
+        ? String(body.consultation_type).trim()
+        : body.appointment_type != null && String(body.appointment_type).trim() !== ""
+          ? String(body.appointment_type).trim()
+          : undefined,
+    appointment_for:
+      body.appointment_for != null && String(body.appointment_for).trim() !== ""
+        ? String(body.appointment_for).trim()
+        : undefined,
+    page_url_disease: buildAppointmentPageUrlDisease(body),
+    status:
+      body.status != null && String(body.status).trim() !== ""
+        ? String(body.status).trim()
+        : "pending",
+    email_status:
+      body.email_status != null && String(body.email_status).trim() !== ""
+        ? String(body.email_status).trim()
+        : undefined,
+    whatsapp_status:
+      body.whatsapp_status != null && String(body.whatsapp_status).trim() !== ""
+        ? String(body.whatsapp_status).trim()
+        : undefined,
     payload_json,
   });
 }
