@@ -345,7 +345,13 @@ function pickAppointmentDatetime(body = {}) {
  * @param {string} [parentUserExternalId] — Mobile App User **`external_id`** when **`user_id`** omitted.
  */
 function mapAppointmentChildRowForFullSync(body = {}, parentUserExternalId) {
-  const appointment_external_id = pickExternalId(body) || undefined;
+  const bidRaw = body.booking_id != null ? String(body.booking_id).trim() : "";
+  const appointment_external_id =
+    body.appointment_external_id != null && String(body.appointment_external_id).trim() !== ""
+      ? String(body.appointment_external_id).trim()
+      : bidRaw
+        ? `appt_${bidRaw}`
+        : pickExternalId(body) || undefined;
   const submission_timestamp =
     body.submission_timestamp != null
       ? toFrappeDatetime(body.submission_timestamp)
