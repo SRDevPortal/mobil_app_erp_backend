@@ -22,11 +22,27 @@ const MOBILE_APP_USER_LIST_FIELDS = [
 function absoluteErpAssetUrl(value) {
   const s = value != null ? String(value).trim() : "";
   if (!s) return "";
-  if (/^https?:\/\//i.test(s)) return s;
+  if (/^https?:\/\//i.test(s)) return normalizePublicFileUrl(s);
   const base = (ERP_BASE_URL || "").replace(/\/+$/, "");
   if (!base) return s;
   const path = s.startsWith("/") ? s : `/${s}`;
-  return `${base}${path}`;
+  return normalizePublicFileUrl(`${base}${path}`);
+}
+
+/** Frappe may emit **:8000** in absolute URLs; HTTPS/ngrok serves without it (same host, port 443). */
+function normalizePublicFileUrl(input) {
+  const s = input != null ? String(input).trim() : "";
+  if (!s) return s;
+  try {
+    const u = new URL(s);
+    if (u.port === "8000") {
+      u.port = "";
+      return u.href;
+    }
+  } catch (_) {
+    /* relative or malformed */
+  }
+  return s.replace(/:8000(?=\/|\?|#|$)/, "");
 }
 
 /**
@@ -49,7 +65,12 @@ function enrichMobileAppUserForApi(doc) {
     avatar_display_url = absoluteErpAssetUrl(path);
   }
 
-  return { ...doc, avatar_display_url };
+  return {
+    ...doc,
+    profile_image_url: normalizePublicFileUrl(profile_image_url) || profile_image_url,
+    avatar_url: normalizePublicFileUrl(avatar_url) || avatar_url,
+    avatar_display_url: normalizePublicFileUrl(avatar_display_url),
+  };
 }
 
 /**
