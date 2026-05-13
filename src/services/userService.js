@@ -2,7 +2,7 @@ const { DOCTYPE, ERP_BASE_URL } = require("../config");
 const { erpGetList, erpGetDoc, erpCallMethod } = require("../frappeClient");
 const { pickExternalId, attachCustomerIdentity } = require("../normalize");
 
-/** Child collections returned by `mobile_app.api.v1.users_lookup` — strip from parent doc for `/lookup` and `/sync`. */
+/** Child collections returned by `mobile_app.api.v1.users_lookup` — stripped before parent-only enrichment; re-attached for `GET …/users/lookup`. */
 const V1_CHILD_KEYS = ["profiles", "sessions", "medical_items", "appointments", "engagement_items"];
 
 /** Fields safe for Frappe `get_list` on Mobile App User (avoid columns not exposed to list query). */
@@ -146,6 +146,16 @@ function stripV1ChildTables(doc) {
   return copy;
 }
 
+/** Re-attach V1 child rows so `GET /api/v1/users/lookup` returns `profiles` (from `users_full_sync`), etc. */
+function mergeV1ChildTablesIntoLookupResponse(enrichedBase, v1Data) {
+  if (!enrichedBase || !v1Data || typeof v1Data !== "object") return enrichedBase;
+  const out = { ...enrichedBase };
+  for (const k of V1_CHILD_KEYS) {
+    if (v1Data[k] != null) out[k] = v1Data[k];
+  }
+  return out;
+}
+
 function partitionV1UsersLookupData(data) {
   if (!data || typeof data !== "object") {
     return { user: null, profile: null, disease_selection: null };
@@ -246,7 +256,8 @@ async function getMobileAppUserForApi(body = {}, params = {}, query = {}) {
   const merged = { ...query, ...params, ...body };
   const v1Data = await tryUsersLookupV1(merged);
   if (v1Data) {
-    return enrichMobileAppUserForApi(stripV1ChildTables(v1Data));
+    const base = enrichMobileAppUserForApi(stripV1ChildTables(v1Data));
+    return mergeV1ChildTablesIntoLookupResponse(base, v1Data);
   }
   return getMobileAppUserForApiLegacy(body, params, query);
 }
