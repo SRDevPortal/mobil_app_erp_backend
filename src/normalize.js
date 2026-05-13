@@ -279,6 +279,56 @@ function mapDoctorToFrappe(body = {}) {
   return stripUndefined(doc);
 }
 
+function pickAppointmentDatetime(body = {}) {
+  if (body.scheduled_at) return toFrappeDatetime(body.scheduled_at);
+  const d = body.appointment_date != null ? String(body.appointment_date).trim() : "";
+  const t = body.appointment_time != null ? String(body.appointment_time).trim() : "";
+  if (d && t) {
+    const combined = `${d} ${t}`;
+    const parsed = new Date(combined);
+    if (!Number.isNaN(parsed.getTime())) return toFrappeDatetime(parsed);
+  }
+  if (d) {
+    const parsed = new Date(d);
+    if (!Number.isNaN(parsed.getTime())) return toFrappeDatetime(parsed);
+  }
+  return undefined;
+}
+
+/**
+ * Row shape for `mobile_app.api.v1.users_full_sync` → **`appointments`** child table
+ * (`Mobile App Appointment Item`), not standalone **Mobile App Appointment**.
+ */
+function mapAppointmentChildRowForFullSync(body = {}) {
+  const appointment_external_id = pickExternalId(body) || undefined;
+  const legacyForPayload = stripUndefined({
+    patient_name: body.patient_name,
+    patient_email: body.patient_email,
+    patient_phone: body.patient_phone,
+    appointment_for: body.appointment_for,
+    appointment_type: body.appointment_type,
+    appointment_date: body.appointment_date,
+    appointment_time: body.appointment_time,
+    scheduled_at: body.scheduled_at,
+    doctor_id: body.doctor_id,
+    disease_name: body.disease_name,
+    page_url: body.page_url,
+    is_removed_by_user: body.is_removed_by_user,
+    created_at: body.created_at,
+    updated_at: body.updated_at,
+  });
+  const payload_json =
+    Object.keys(legacyForPayload).length > 0 ? frappeJsonField(legacyForPayload) : undefined;
+  return stripUndefined({
+    appointment_external_id,
+    doctor_name: body.doctor_name != null ? String(body.doctor_name).trim() : undefined,
+    booking_id: body.booking_id != null ? String(body.booking_id).trim() : undefined,
+    status: body.status != null && String(body.status).trim() !== "" ? String(body.status).trim() : "pending",
+    appointment_datetime: pickAppointmentDatetime(body),
+    payload_json,
+  });
+}
+
 function mapAppointmentToFrappe(body = {}, userLinkName) {
   const doc = {
     external_id: pickExternalId(body) || undefined,
@@ -420,6 +470,7 @@ module.exports = {
   mapPrescriptionToFrappe,
   mapDoctorToFrappe,
   mapAppointmentToFrappe,
+  mapAppointmentChildRowForFullSync,
   mapNotificationToFrappe,
   mapSupportTicketToFrappe,
   mapWebhookEventToFrappe,
