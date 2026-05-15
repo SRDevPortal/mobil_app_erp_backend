@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
-const { DOCTYPE, ERP_BASE_URL, erpAuthHeader } = require("../config");
+const { DOCTYPE } = require("../config");
 const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
 const {
   findMobileAppUser,
@@ -10,6 +10,7 @@ const {
   syncMobileAppUserViaV1,
 } = require("../services/userService");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
+const { uploadProfileImageOnly } = require("../services/frappeProfileImageUpload");
 const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity } = require("../normalize");
 
 const router = express.Router();
@@ -97,9 +98,6 @@ router.post("/sessions/sync", async (req, res) => {
 
 router.post("/profile-image", upload.single("file"), async (req, res) => {
   try {
-    if (!ERP_BASE_URL) {
-      return res.status(503).json({ success: false, message: "ERP_BASE_URL is not configured" });
-    }
     if (!req.file || !req.file.buffer?.length) {
       return res.status(400).json({ success: false, message: "Missing file in form-data field 'file'" });
     }
@@ -111,53 +109,19 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
       return res.status(400).json({ success: false, message: "Provide supabase_user_id or external_id" });
     }
 
-    const form = new FormData();
-    form.append("supabase_user_id", supabase_user_id);
-    form.append(
-      "file",
-      new Blob([req.file.buffer], { type: req.file.mimetype || "application/octet-stream" }),
-      req.file.originalname || "profile-image.jpg"
-    );
-
-    const endpoint = `${ERP_BASE_URL.replace(/\/+$/, "")}/api/method/mobile_app.api.profile_image.upload_profile_image`;
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: { ...erpAuthHeader() },
-      body: form,
-    });
-
-    const raw = await upstream.text();
-    let parsed;
-    try {
-      parsed = raw ? JSON.parse(raw) : {};
-    } catch (_) {
-      parsed = { message: raw };
-    }
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        success: false,
-        message: parsed?.message || parsed?.exc || `Frappe upload failed: ${upstream.status}`,
-        payload: parsed,
-      });
-    }
-
-    const msg = parsed?.message || parsed?.data || parsed || {};
-    const profile_image_url = (msg.profile_image_url || msg.image_url || msg.url || "").toString().trim();
-    const image = (msg.image || "").toString().trim();
-
-    const { saved, external_id: resolvedExternal } = await upsertMobileAppUser({
-      external_id: external_id || supabase_user_id,
-      supabase_user_id,
-      ...(profile_image_url ? { profile_image_url, avatar_url: profile_image_url } : {}),
-      ...(image ? { image } : {}),
+    const result = await uploadProfileImageOnly({
+      supabaseUserId: supabase_user_id,
+      externalId: external_id || supabase_user_id,
+      fileBuffer: req.file.buffer,
+      mimetype: req.file.mimetype || "image/jpeg",
     });
 
     return res.json({
       success: true,
       data: {
-        ...attachCustomerIdentity(saved || {}, saved?.external_id || resolvedExternal || supabase_user_id),
-        profile_image_url: profile_image_url || saved?.profile_image_url || null,
-        image: image || saved?.image || null,
+        ...attachCustomerIdentity(result.saved || {}, result.external_id || supabase_user_id),
+        profile_image_url: result.profile_image_url,
+        image: result.image,
       },
     });
   } catch (e) {
