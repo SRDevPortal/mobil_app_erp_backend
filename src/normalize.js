@@ -104,12 +104,27 @@ function toFrappeTimeOnly(value) {
   if (value == null || value === "") return undefined;
   if (typeof value === "string") {
     const s = value.trim();
-    const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    // Wall-clock with AM/PM (e.g. "2:30 PM") — must not treat as 24h "02:30".
+    const ampm = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])\s*$/);
+    if (ampm) {
+      let h = Number(ampm[1]);
+      const mm = ampm[2];
+      const ss = (ampm[3] ?? "00").padStart(2, "0");
+      const ap = ampm[4].toUpperCase();
+      if (Number.isNaN(h) || h < 1 || h > 12) return undefined;
+      if (ap === "PM" && h !== 12) h += 12;
+      if (ap === "AM" && h === 12) h = 0;
+      return `${String(h).padStart(2, "0")}:${mm}:${ss}`;
+    }
+    const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) {
-      const hh = String(Number(m[1])).padStart(2, "0");
-      const mm = m[2];
-      const ss = (m[3] ?? "00").padStart(2, "0");
-      return `${hh}:${mm}:${ss}`;
+      const h24 = Number(m[1]);
+      if (!Number.isNaN(h24) && h24 >= 0 && h24 <= 23) {
+        const hh = String(h24).padStart(2, "0");
+        const mm = m[2];
+        const ss = (m[3] ?? "00").padStart(2, "0");
+        return `${hh}:${mm}:${ss}`;
+      }
     }
   }
   const d = value instanceof Date ? value : new Date(value);
@@ -174,6 +189,35 @@ function mapProfileChildRowForFullSync(row = {}) {
   const fs =
     row.force_profile_setup === true ? 1 : row.force_profile_setup === false ? 0 : row.force_profile_setup;
   const pdj = row.profile_data_json;
+  const disease_name = pickDiseaseName(row) || undefined;
+  const disease_id = row.disease_id != null ? String(row.disease_id).trim() : undefined;
+  let profile_data_json;
+  if (pdj !== undefined) {
+    let parsed = pdj;
+    if (typeof pdj === "string") {
+      try {
+        parsed = JSON.parse(pdj);
+      } catch (_) {
+        parsed = pdj;
+      }
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const merged = { ...parsed };
+      if (disease_name && !merged.disease_name) merged.disease_name = disease_name;
+      if (disease_name && !merged.disease) merged.disease = disease_name;
+      if (disease_id && !merged.disease_id) merged.disease_id = disease_id;
+      profile_data_json = frappeJsonField(merged);
+    } else {
+      profile_data_json = typeof pdj === "string" ? pdj : frappeJsonField(pdj);
+    }
+  } else if (disease_name || disease_id) {
+    profile_data_json = frappeJsonField(
+      stripUndefined({
+        ...(disease_name ? { disease_name, disease: disease_name } : {}),
+        ...(disease_id ? { disease_id } : {}),
+      }),
+    );
+  }
   const numOrUndef = (v) => {
     if (v === undefined || v === null || v === "") return undefined;
     const n = Number(v);
@@ -189,8 +233,9 @@ function mapProfileChildRowForFullSync(row = {}) {
     email: row.email != null ? String(row.email).trim() : undefined,
     profile_complete: pc !== undefined && pc !== "" ? pc : undefined,
     force_profile_setup: fs !== undefined && fs !== "" ? fs : undefined,
-    profile_data_json:
-      pdj !== undefined ? (typeof pdj === "string" ? pdj : frappeJsonField(pdj)) : undefined,
+    profile_data_json,
+    disease_name,
+    disease_id: disease_id || undefined,
     membership_type: row.membership_type,
     doctor_assigned: row.doctor_assigned,
     patient_id: row.patient_id,
