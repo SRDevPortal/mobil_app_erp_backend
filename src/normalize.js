@@ -310,7 +310,7 @@ function mapHealthEntryToFrappe(body = {}, userLinkName) {
     tool_key: body.tool_key != null ? String(body.tool_key).trim() : undefined,
     entry_id: body.entry_id,
     entry_timestamp: body.entry_timestamp ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime()) : nowFrappeDatetime(),
-    data_json: body.data_json ?? body.data ?? {},
+    data_json: frappeJsonField(body.data_json ?? body.data ?? []),
     score: body.score,
     source: body.source || "app",
     is_deleted: body.is_deleted === true ? 1 : 0,
@@ -318,6 +318,52 @@ function mapHealthEntryToFrappe(body = {}, userLinkName) {
     updated_at: body.updated_at ? toFrappeDatetime(body.updated_at, nowFrappeDatetime()) : nowFrappeDatetime(),
   };
   return stripUndefined(doc);
+}
+
+/** Stable id for one tool snapshot row under Mobile App User → `health_entries` child table. */
+function pickHealthEntryExternalId(body = {}) {
+  if (body.health_entry_external_id != null && String(body.health_entry_external_id).trim() !== "") {
+    return String(body.health_entry_external_id).trim();
+  }
+  const tool = body.tool_key != null ? String(body.tool_key).trim() : "";
+  if (tool) return `health_${tool}`;
+  return undefined;
+}
+
+/**
+ * Row shape for `mobile_app.api.v1.users_full_sync` → **`health_entries`** child table
+ * (`Mobile App Health Entry Item`), not standalone **Mobile App Health Entry** Resource.
+ *
+ * `data_json` is the full in-app log list for `tool_key` after each save (array → JSON string).
+ */
+function mapHealthEntryChildRowForFullSync(body = {}, parentUserExternalId) {
+  const tool_key = body.tool_key != null ? String(body.tool_key).trim() : "";
+  const health_entry_external_id = pickHealthEntryExternalId(body);
+  const entry_timestamp = body.entry_timestamp
+    ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime())
+    : nowFrappeDatetime();
+
+  const uid =
+    body.user_id != null && String(body.user_id).trim() !== ""
+      ? String(body.user_id).trim()
+      : parentUserExternalId != null && String(parentUserExternalId).trim() !== ""
+        ? String(parentUserExternalId).trim()
+        : undefined;
+
+  const dataPayload = body.data_json !== undefined ? body.data_json : body.data !== undefined ? body.data : [];
+
+  return stripUndefined({
+    health_entry_external_id,
+    user_id: uid,
+    tool_key: tool_key || undefined,
+    entry_id: body.entry_id != null ? String(body.entry_id).trim() : undefined,
+    entry_timestamp,
+    data_json: frappeJsonField(dataPayload),
+    score: body.score,
+    source: body.source != null && String(body.source).trim() !== "" ? String(body.source).trim() : "app",
+    is_deleted:
+      body.is_deleted === true ? 1 : body.is_deleted === false ? 0 : body.is_deleted,
+  });
 }
 
 function mapSessionToFrappe(body = {}, userLinkName) {
@@ -610,6 +656,8 @@ module.exports = {
   buildProfilesPayloadForFullSync,
   mapDiseaseSelectionToFrappe,
   mapHealthEntryToFrappe,
+  pickHealthEntryExternalId,
+  mapHealthEntryChildRowForFullSync,
   mapSessionToFrappe,
   mapPrescriptionToFrappe,
   mapDoctorToFrappe,

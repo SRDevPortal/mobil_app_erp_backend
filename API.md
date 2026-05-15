@@ -75,6 +75,8 @@ If **`MOBILE_APP_ERP_TOKEN`** is unset, **`/api/method/mobile_app.api.v1.*`** ca
 |--------------------|---------------------------|
 | `GET /api/v1/users/lookup`, `POST …/users/sync` | `mobile_app.api.v1.users_lookup` / `users_sync` |
 | `POST /api/v1/profiles/sync` | `mobile_app.api.v1.users_full_sync` |
+| `POST /api/v1/health-entries` | `mobile_app.api.v1.users_full_sync` (`health_entries` child table) |
+| `POST /api/v1/appointments` | `mobile_app.api.v1.users_full_sync` (`appointments` child table) |
 | Other DocType routes | `/api/resource/<DocType>/…` |
 
 **Alternative:** change **`require_app_token()`** in the **`mobile_app`** Frappe app so it accepts only **`Authorization`** (API user) and drops the separate site token — then you would not need **`MOBILE_APP_ERP_TOKEN`** on Node (security tradeoff on your side).
@@ -435,17 +437,28 @@ curl -sS -X POST "http://localhost:3101/api/v1/disease-selections" \
 
 ---
 
-## 8) Create Mobile App Health Entry
+## 8) Upsert health tool snapshot (`health_entries` child table)
 
-**`POST /api/v1/health-entries`** → **201**, **400**, or **404**
+**`POST /api/v1/health-entries`** → **201**, **400**, or **502**
 
-`tool_key` is required.
+Upserts one row per **`tool_key`** on **Mobile App User** → **`health_entries`** via **`mobile_app.api.v1.users_full_sync`** (same pattern as profiles / appointments). There is **no** Resource API fallback when health rows exist only as child items.
+
+| Field | Required | Notes |
+|--------|----------|--------|
+| `external_id` | Yes | Supabase user UUID (alias: `customer_id`, `id`) |
+| `tool_key` | Yes | e.g. `bp_data`, `vaginal_health_data` — see `src/healthToolKeys.js` |
+| `entry_id` | No | Client sync id, e.g. `local_{ms}_{hash}` |
+| `entry_timestamp` | No | ISO 8601 UTC; defaults to now |
+| `data_json` | No | **Full** in-memory log **array** for that tool after save (not a single reading only) |
+| `source` | No | Default `app` |
+
+Stable row id: **`health_entry_external_id`** = `health_{tool_key}` (override with `health_entry_external_id` in body if needed).
 
 ```bash
 curl -sS -X POST "http://localhost:3101/api/v1/health-entries" \
   -H "Content-Type: application/json" \
   -H "X-ERP-Token: YOUR_APP_TOKEN" \
-  -d "{\"external_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"tool_key\":\"bp_data\",\"entry_id\":\"local-entry-1\",\"entry_timestamp\":\"2026-05-12T08:00:00.000Z\",\"data_json\":{\"systolic\":120,\"diastolic\":80},\"source\":\"app\"}"
+  -d "{\"external_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"tool_key\":\"bp_data\",\"entry_id\":\"local-entry-1\",\"entry_timestamp\":\"2026-05-12T08:00:00.000Z\",\"data_json\":[{\"id\":1,\"systolic\":120,\"diastolic\":80,\"pulse\":72,\"date\":\"2026-05-12\",\"time\":\"08:00:00\"}],\"source\":\"app\"}"
 ```
 
 **Example 201 response:**
@@ -454,16 +467,15 @@ curl -sS -X POST "http://localhost:3101/api/v1/health-entries" \
 {
   "success": true,
   "data": {
-    "name": "entry-uuid-here",
-    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "external_id": "550e8400-e29b-41d4-a716-446655440000",
     "tool_key": "bp_data",
-    "entry_timestamp": "2026-05-12 08:00:00.000000",
-    "data_json": { "systolic": 120, "diastolic": 80 },
-    "source": "app",
-    "modified": "2026-05-12 10:30:00.000000"
+    "health_entry_external_id": "health_bp_data",
+    "entries_count": 1
   }
 }
 ```
+
+**`GET /api/v1/users/lookup`** returns saved snapshots under **`health_entries`** when Frappe **`users_lookup`** exposes that child table.
 
 **Example 400 response:**
 

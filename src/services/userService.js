@@ -3,7 +3,14 @@ const { erpGetList, erpGetDoc, erpCallMethod } = require("../frappeClient");
 const { pickExternalId, attachCustomerIdentity } = require("../normalize");
 
 /** Child collections returned by `mobile_app.api.v1.users_lookup` — stripped before parent-only enrichment; re-attached for `GET …/users/lookup`. */
-const V1_CHILD_KEYS = ["profiles", "sessions", "medical_items", "appointments", "engagement_items"];
+const V1_CHILD_KEYS = [
+  "profiles",
+  "sessions",
+  "medical_items",
+  "appointments",
+  "health_entries",
+  "engagement_items",
+];
 
 /** Fields safe for Frappe `get_list` on Mobile App User (avoid columns not exposed to list query). */
 const MOBILE_APP_USER_LIST_FIELDS = [

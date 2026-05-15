@@ -126,7 +126,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"tool_key\": \"bp_data\",\n  \"entry_id\": \"local-entry-1\",\n  \"entry_timestamp\": \"2026-05-12T08:00:00.000Z\",\n  \"data_json\": { \"systolic\": 120, \"diastolic\": 80 },\n  \"source\": \"app\"\n}"
+          "raw": "{\n  \"external_id\": \"{{sample_user_external_id}}\",\n  \"tool_key\": \"bp_data\",\n  \"entry_id\": \"local-entry-1\",\n  \"entry_timestamp\": \"2026-05-12T08:00:00.000Z\",\n  \"data_json\": [\n    {\n      \"id\": 1,\n      \"systolic\": 120,\n      \"diastolic\": 80,\n      \"pulse\": 72,\n      \"date\": \"2026-05-12\",\n      \"time\": \"08:00:00\"\n    }\n  ],\n  \"source\": \"app\"\n}"
         },
         "url": "{{base_url}}/api/v1/health-entries"
       }

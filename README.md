@@ -39,13 +39,13 @@ npm run dev
 | `POST` | `/api/v1/users/sync` | Upsert **Mobile App User**; accepts `id` / `customer_id` / `external_id`, `supabase_user_id`, name aliases from `filds.md` |
 | `GET` | `/api/v1/users/lookup` | Query user by same identifiers |
 | `POST` | `/api/v1/users/sessions/sync` | Upsert **Mobile App User Session**; resolve user from body; use `session_external_id` / `user_session_id` / `session_id` for the session row (not the user `id`) |
-| `POST` | `/api/v1/profiles/sync` | Upsert **Mobile App User Profile**; requires user lookup fields in body |
+| `POST` | `/api/v1/profiles/sync` | Upsert **`profiles`** child via `users_full_sync` |
 | `POST` | `/api/v1/diseases/sync` | Upsert **Mobile App Disease** master |
 | `POST` | `/api/v1/disease-selections` | Create **Mobile App User Disease Selection** |
-| `POST` | `/api/v1/health-entries` | Create **Mobile App Health Entry** (`tool_key` required) |
+| `POST` | `/api/v1/health-entries` | Upsert **`health_entries`** child via `users_full_sync` (one row per `tool_key`, full `data_json` log array) |
 | `POST` | `/api/v1/prescriptions` | Create **Mobile App Prescription** |
 | `POST` | `/api/v1/doctors/sync` | Upsert **Mobile App Doctor** |
-| `POST` | `/api/v1/appointments` | Create or update by `booking_id` when present |
+| `POST` | `/api/v1/appointments` | Upsert **`appointments`** child via `users_full_sync` (by `booking_id` / `appointment_external_id`) |
 | `POST` | `/api/v1/notifications` | Create **Mobile App Notification** (`type` → `notification_type`) |
 | `POST` | `/api/v1/support-tickets` | Create **Mobile App Support Ticket** (`name` → `requester_name`) |
 | `POST` | `/api/v1/webhook-events` | Create **Mobile App Webhook Event**; optional user via `customer_id` / `customer_email` / normal user keys |
