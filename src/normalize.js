@@ -145,7 +145,7 @@ function frappeJsonField(value) {
 
 function mapUserToFrappe(body = {}) {
   const external_id = pickExternalId(body);
-  const full_name = pickName(body);
+  const full_name = pickName(body) || external_id;
   const phone = pickPhone(body);
   const doc = {
     external_id: external_id || undefined,
@@ -163,20 +163,6 @@ function mapUserToFrappe(body = {}) {
     updated_at: body.updated_at ? toFrappeDatetime(body.updated_at, nowFrappeDatetime()) : nowFrappeDatetime(),
   };
   return stripUndefined(doc);
-}
-
-/** Partial Mobile App User update after profile photo upload - never touches name / email / phone. */
-function mapUserProfileImagePatchToFrappe(body = {}) {
-  const profile_image_url =
-    body.profile_image_url != null ? String(body.profile_image_url).trim() : "";
-  const avatar_url = body.avatar_url != null ? String(body.avatar_url).trim() : "";
-  const image = body.image != null ? String(body.image).trim() : "";
-  return stripUndefined({
-    profile_image_url: profile_image_url || undefined,
-    avatar_url: avatar_url || profile_image_url || undefined,
-    image: image || undefined,
-    updated_at: nowFrappeDatetime(),
-  });
 }
 
 /** Row shape for `mobile_app.api.v1.users_full_sync` → **`profiles`** child table (not standalone DocType). */
@@ -569,7 +555,6 @@ module.exports = {
   nowFrappeDatetime,
   frappeJsonField,
   mapUserToFrappe,
-  mapUserProfileImagePatchToFrappe,
   mapProfileToFrappe,
   mapProfileChildRowForFullSync,
   buildProfilesPayloadForFullSync,
