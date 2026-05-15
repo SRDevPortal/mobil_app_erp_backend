@@ -180,6 +180,33 @@ function mapUserToFrappe(body = {}) {
   return stripUndefined(doc);
 }
 
+/** Remove disease keys from JSON cache — disease belongs on profile field `disease`, not `profile_data_json`. */
+function stripDiseaseKeysFromProfileJson(value) {
+  if (value == null) return undefined;
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch (_) {
+      return value;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return typeof value === "string" ? value : frappeJsonField(value);
+  }
+  const {
+    disease: _d,
+    disease_name: _dn,
+    disease_id: _di,
+    selected_disease: _sd,
+    selectedDisease: _sD,
+    ...rest
+  } = parsed;
+  const keys = Object.keys(rest);
+  if (keys.length === 0) return undefined;
+  return frappeJsonField(rest);
+}
+
 /** Row shape for `mobile_app.api.v1.users_full_sync` → **`profiles`** child table (not standalone DocType). */
 function mapProfileChildRowForFullSync(row = {}) {
   const profile_name =
@@ -188,36 +215,14 @@ function mapProfileChildRowForFullSync(row = {}) {
     row.profile_complete === true ? 1 : row.profile_complete === false ? 0 : row.profile_complete;
   const fs =
     row.force_profile_setup === true ? 1 : row.force_profile_setup === false ? 0 : row.force_profile_setup;
-  const pdj = row.profile_data_json;
-  const disease_name = pickDiseaseName(row) || undefined;
-  const disease_id = row.disease_id != null ? String(row.disease_id).trim() : undefined;
-  let profile_data_json;
-  if (pdj !== undefined) {
-    let parsed = pdj;
-    if (typeof pdj === "string") {
-      try {
-        parsed = JSON.parse(pdj);
-      } catch (_) {
-        parsed = pdj;
-      }
-    }
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const merged = { ...parsed };
-      if (disease_name && !merged.disease_name) merged.disease_name = disease_name;
-      if (disease_name && !merged.disease) merged.disease = disease_name;
-      if (disease_id && !merged.disease_id) merged.disease_id = disease_id;
-      profile_data_json = frappeJsonField(merged);
-    } else {
-      profile_data_json = typeof pdj === "string" ? pdj : frappeJsonField(pdj);
-    }
-  } else if (disease_name || disease_id) {
-    profile_data_json = frappeJsonField(
-      stripUndefined({
-        ...(disease_name ? { disease_name, disease: disease_name } : {}),
-        ...(disease_id ? { disease_id } : {}),
-      }),
-    );
-  }
+  const disease =
+    row.disease != null && String(row.disease).trim() !== ""
+      ? String(row.disease).trim()
+      : pickDiseaseName(row) || undefined;
+  const profile_data_json =
+    row.profile_data_json !== undefined
+      ? stripDiseaseKeysFromProfileJson(row.profile_data_json)
+      : undefined;
   const numOrUndef = (v) => {
     if (v === undefined || v === null || v === "") return undefined;
     const n = Number(v);
@@ -234,8 +239,7 @@ function mapProfileChildRowForFullSync(row = {}) {
     profile_complete: pc !== undefined && pc !== "" ? pc : undefined,
     force_profile_setup: fs !== undefined && fs !== "" ? fs : undefined,
     profile_data_json,
-    disease_name,
-    disease_id: disease_id || undefined,
+    disease,
     membership_type: row.membership_type,
     doctor_assigned: row.doctor_assigned,
     patient_id: row.patient_id,
@@ -601,6 +605,7 @@ module.exports = {
   frappeJsonField,
   mapUserToFrappe,
   mapProfileToFrappe,
+  stripDiseaseKeysFromProfileJson,
   mapProfileChildRowForFullSync,
   buildProfilesPayloadForFullSync,
   mapDiseaseSelectionToFrappe,
