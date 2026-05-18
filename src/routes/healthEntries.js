@@ -10,8 +10,11 @@ const {
 const { pickExternalId, pickPhone } = require("../normalize");
 const {
   HEALTH_TOOL_KEYS,
+  CANONICAL_MOTOR_NEURO_KEYS,
   isKnownHealthToolKey,
   normalizeHealthToolKey,
+  frappeHealthEntryIdentity,
+  useCanonicalFrappeMotorNeuroKeys,
 } = require("../healthToolKeys");
 
 const router = express.Router();
@@ -86,30 +89,70 @@ router.post("/", async (req, res) => {
       }
     }
 
-    const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
     const entriesCount = dedupeLogsById(incomingLogs).length;
+    const syncPayload = () =>
+      stripRootUndefined({
+        external_id: parentExternalId,
+        supabase_user_id:
+          body.supabase_user_id != null
+            ? String(body.supabase_user_id).trim()
+            : parentExternalId,
+        email: body.email != null ? String(body.email).trim() : undefined,
+        phone: pickPhone(body) || undefined,
+      });
+
+    const callUsersFullSync = async (health_entries) =>
+      erpCallMethod("mobile_app.api.v1.users_full_sync", {
+        method: "POST",
+        body: { ...syncPayload(), health_entries },
+      });
+
+    const isMotorNeuro = CANONICAL_MOTOR_NEURO_KEYS.has(tool_key);
+    const tryCanonicalFirst = !isMotorNeuro || useCanonicalFrappeMotorNeuroKeys();
+    const primaryCanonical = tryCanonicalFirst;
+    const fallbackCanonical = !tryCanonicalFirst;
+
+    let frappeIdentityUsed = frappeHealthEntryIdentity(tool_key, {
+      useCanonical: primaryCanonical,
+    });
+    let next = mergeHealthEntriesForToolSync(existing, body, parentExternalId, {
+      useCanonicalFrappeKeys: primaryCanonical,
+    });
 
     let parsed;
     try {
-      parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
-        method: "POST",
-        body: stripRootUndefined({
-          external_id: parentExternalId,
-          supabase_user_id:
-            body.supabase_user_id != null ? String(body.supabase_user_id).trim() : undefined,
-          email: body.email != null ? String(body.email).trim() : undefined,
-          phone: pickPhone(body) || undefined,
-          health_entries: next,
-        }),
-      });
+      parsed = await callUsersFullSync(next);
     } catch (e) {
-      const status = e.status >= 400 && e.status < 600 ? e.status : 502;
-      return res.status(status).json({
-        success: false,
-        message: e.message || "users_full_sync failed",
-        frappePath: e.frappePath,
-        detail: e.payload,
-      });
+      const canRetryAlternate =
+        isMotorNeuro && incomingLogs.length > 0;
+      if (!canRetryAlternate) {
+        const status = e.status >= 400 && e.status < 600 ? e.status : 502;
+        return res.status(status).json({
+          success: false,
+          message: e.message || "users_full_sync failed",
+          frappePath: e.frappePath,
+          detail: e.payload,
+        });
+      }
+      try {
+        frappeIdentityUsed = frappeHealthEntryIdentity(tool_key, {
+          useCanonical: fallbackCanonical,
+        });
+        next = mergeHealthEntriesForToolSync(existing, body, parentExternalId, {
+          useCanonicalFrappeKeys: fallbackCanonical,
+        });
+        parsed = await callUsersFullSync(next);
+      } catch (retryErr) {
+        const status = retryErr.status >= 400 && retryErr.status < 600 ? retryErr.status : 502;
+        return res.status(status).json({
+          success: false,
+          message: retryErr.message || "users_full_sync failed",
+          frappePath: retryErr.frappePath,
+          detail: retryErr.payload,
+          canonical_tool_key: tool_key,
+          frappe_tool_key_attempted: frappeIdentityUsed.tool_key,
+        });
+      }
     }
 
     const data = unwrapMobileAppV1Message(parsed);
@@ -119,7 +162,9 @@ router.post("/", async (req, res) => {
         data: {
           ...data,
           tool_key,
-          health_entry_external_id: `health_${tool_key}`,
+          canonical_tool_key: tool_key,
+          frappe_tool_key: frappeIdentityUsed.tool_key,
+          health_entry_external_id: frappeIdentityUsed.health_entry_external_id,
           entries_count: entriesCount,
         },
       });

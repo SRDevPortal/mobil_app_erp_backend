@@ -1,5 +1,9 @@
 const { frappeJsonField, toFrappeDatetime, nowFrappeDatetime } = require("../normalize");
-const { normalizeHealthToolKey } = require("../healthToolKeys");
+const {
+  normalizeHealthToolKey,
+  frappeHealthEntryIdentity,
+  frappeIdentitiesForCanonicalTool,
+} = require("../healthToolKeys");
 
 function stripUndefined(obj) {
   const out = {};
@@ -74,26 +78,35 @@ function mergeLogsPreferIncoming(existingLogs, incomingLogs) {
   return [...byId.values()];
 }
 
-function legacyMotorNeuroExtIds(canonicalToolKey) {
-  if (canonicalToolKey === "motor_function") {
-    return new Set(["health_paralysis_motor_function", "health_paralysis_mobility_gait"]);
-  }
-  if (canonicalToolKey === "neuro_function") {
-    return new Set(["health_paralysis_neuro_function"]);
-  }
-  return new Set();
-}
-
 function rowMatchesCanonicalTool(row, canonicalToolKey) {
   if (!row || typeof row !== "object") return false;
   const tool = normalizeHealthToolKey(String(canonicalToolKey).trim());
   const rowTool = normalizeHealthToolKey(String(row.tool_key || "").trim());
   if (rowTool === tool) return true;
 
-  const snapshotId = pickToolSnapshotExternalId(tool);
   const ext = row.health_entry_external_id != null ? String(row.health_entry_external_id).trim() : "";
-  if (ext === snapshotId || legacyMotorNeuroExtIds(tool).has(ext)) return true;
-  if (ext.startsWith(`${snapshotId}_`)) return true;
+  for (const identity of frappeIdentitiesForCanonicalTool(tool)) {
+    if (ext === identity.health_entry_external_id) return true;
+    if (ext.startsWith(`${identity.health_entry_external_id}_`)) return true;
+    if (ext.startsWith(`${pickToolSnapshotExternalId(tool)}_`)) return true;
+  }
+  return false;
+}
+
+function rowShouldRemoveForCanonicalToolSync(row, canonicalToolKey) {
+  if (!row || typeof row !== "object") return false;
+  const tool = normalizeHealthToolKey(String(canonicalToolKey).trim());
+  const rowTool = String(row.tool_key || "").trim();
+  const ext = row.health_entry_external_id != null ? String(row.health_entry_external_id).trim() : "";
+
+  for (const identity of frappeIdentitiesForCanonicalTool(tool)) {
+    if (rowTool === identity.tool_key) return true;
+    if (ext === identity.health_entry_external_id) return true;
+    if (ext.startsWith(`${identity.health_entry_external_id}_`)) return true;
+  }
+  if (normalizeHealthToolKey(rowTool) === tool) return true;
+  if (ext === pickToolSnapshotExternalId(tool)) return true;
+  if (ext.startsWith(`${pickToolSnapshotExternalId(tool)}_`)) return true;
   return false;
 }
 
@@ -140,12 +153,14 @@ function collectLogsFromExistingRows(existingRows, toolKey) {
   return logs;
 }
 
-function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
+function mapToolSnapshotRow(body = {}, parentUserExternalId, logs, options = {}) {
   const canonicalToolKey = normalizeHealthToolKey(
     body.tool_key != null ? String(body.tool_key).trim() : "",
   );
-  const health_entry_external_id = pickToolSnapshotExternalId(canonicalToolKey);
-  const tool_key = canonicalToolKey;
+  const identity = frappeHealthEntryIdentity(canonicalToolKey, {
+    useCanonical: options.useCanonicalFrappeKeys,
+  });
+  const { tool_key, health_entry_external_id } = identity;
   const entry_timestamp = body.entry_timestamp
     ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime())
     : nowFrappeDatetime();
@@ -174,38 +189,15 @@ function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
  * Keep one `health_entries` row per `tool_key`; store every log in `data_json` array.
  * Removes duplicate / per-log rows for the same tool from older syncs.
  */
-function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId) {
+function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId, options = {}) {
   const tool_key = normalizeHealthToolKey(
     body.tool_key != null ? String(body.tool_key).trim() : "",
   );
   body.tool_key = tool_key;
-  const snapshotId = pickToolSnapshotExternalId(tool_key);
-  const prefix = `${snapshotId}_`;
-  const legacyMotorNeuro =
-    tool_key === "motor_function"
-      ? new Set([
-          "paralysis_motor_function",
-          "paralysis_mobility_gait",
-          "motor_log_data",
-        ])
-      : tool_key === "neuro_function"
-        ? new Set(["paralysis_neuro_function", "functional_log_data"])
-        : new Set();
 
   const withoutTool = (existingRows || []).filter((r) => {
     if (!r || typeof r !== "object") return true;
-    const rowTool = String(r.tool_key || "").trim();
-    if (rowTool === tool_key) return false;
-    if (legacyMotorNeuro.has(rowTool)) return false;
-    const ext = r.health_entry_external_id != null ? String(r.health_entry_external_id).trim() : "";
-    if (ext.startsWith(prefix)) return false;
-    if (tool_key === "motor_function" && (ext === "health_paralysis_motor_function" || ext === "health_paralysis_mobility_gait")) {
-      return false;
-    }
-    if (tool_key === "neuro_function" && ext === "health_paralysis_neuro_function") {
-      return false;
-    }
-    return true;
+    return !rowShouldRemoveForCanonicalToolSync(r, tool_key);
   });
 
   const incoming = dedupeLogsById(logsFromSyncBody(body));
@@ -216,7 +208,10 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId)
     return withoutTool;
   }
 
-  return [...withoutTool, mapToolSnapshotRow(body, parentUserExternalId, mergedLogs)];
+  return [
+    ...withoutTool,
+    mapToolSnapshotRow(body, parentUserExternalId, mergedLogs, options),
+  ];
 }
 
 function buildHealthEntryRowsForToolSync(body, parentUserExternalId) {
@@ -232,6 +227,7 @@ module.exports = {
   mergeLogsPreferIncoming,
   collectLogsFromExistingRows,
   mapToolSnapshotRow,
+  rowShouldRemoveForCanonicalToolSync,
   buildHealthEntryRowsForToolSync,
   mergeHealthEntriesForToolSync,
 };
