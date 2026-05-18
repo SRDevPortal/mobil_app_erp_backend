@@ -1,5 +1,5 @@
 const { frappeJsonField, toFrappeDatetime, nowFrappeDatetime } = require("../normalize");
-const { normalizeHealthToolKey } = require("../healthToolKeys");
+const { normalizeHealthToolKey, toFrappeHealthToolKey } = require("../healthToolKeys");
 
 function stripUndefined(obj) {
   const out = {};
@@ -58,16 +58,55 @@ function dedupeLogsById(logs) {
   return out;
 }
 
+/** Incoming app payload wins over existing ERP logs with the same id. */
+function mergeLogsPreferIncoming(existingLogs, incomingLogs) {
+  const byId = new Map();
+  for (let i = 0; i < existingLogs.length; i++) {
+    const log = existingLogs[i];
+    if (!log || typeof log !== "object") continue;
+    byId.set(pickLogId(log, i), log);
+  }
+  for (let i = 0; i < incomingLogs.length; i++) {
+    const log = incomingLogs[i];
+    if (!log || typeof log !== "object") continue;
+    byId.set(pickLogId(log, i), log);
+  }
+  return [...byId.values()];
+}
+
+function legacyMotorNeuroExtIds(canonicalToolKey) {
+  if (canonicalToolKey === "motor_function") {
+    return new Set(["health_paralysis_motor_function", "health_paralysis_mobility_gait"]);
+  }
+  if (canonicalToolKey === "neuro_function") {
+    return new Set(["health_paralysis_neuro_function"]);
+  }
+  return new Set();
+}
+
+function rowMatchesCanonicalTool(row, canonicalToolKey) {
+  if (!row || typeof row !== "object") return false;
+  const tool = normalizeHealthToolKey(String(canonicalToolKey).trim());
+  const rowTool = normalizeHealthToolKey(String(row.tool_key || "").trim());
+  if (rowTool === tool) return true;
+
+  const snapshotId = pickToolSnapshotExternalId(tool);
+  const ext = row.health_entry_external_id != null ? String(row.health_entry_external_id).trim() : "";
+  if (ext === snapshotId || legacyMotorNeuroExtIds(tool).has(ext)) return true;
+  if (ext.startsWith(`${snapshotId}_`)) return true;
+  return false;
+}
+
 /** Read logs from any existing row for this tool (snapshot array or legacy per-log rows). */
 function collectLogsFromExistingRows(existingRows, toolKey) {
-  const tool = String(toolKey).trim();
+  const tool = normalizeHealthToolKey(String(toolKey).trim());
   const snapshotId = pickToolSnapshotExternalId(tool);
   const logs = [];
   const seen = new Set();
 
   for (const row of existingRows || []) {
     if (!row || typeof row !== "object") continue;
-    if (String(row.tool_key || "").trim() !== tool) continue;
+    if (!rowMatchesCanonicalTool(row, tool)) continue;
 
     const ext = row.health_entry_external_id != null ? String(row.health_entry_external_id).trim() : "";
     const parsed = parseJsonFieldValue(row.data_json);
@@ -102,8 +141,11 @@ function collectLogsFromExistingRows(existingRows, toolKey) {
 }
 
 function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
-  const tool_key = body.tool_key != null ? String(body.tool_key).trim() : "";
-  const health_entry_external_id = pickToolSnapshotExternalId(tool_key);
+  const canonicalToolKey = normalizeHealthToolKey(
+    body.tool_key != null ? String(body.tool_key).trim() : "",
+  );
+  const health_entry_external_id = pickToolSnapshotExternalId(canonicalToolKey);
+  const tool_key = toFrappeHealthToolKey(canonicalToolKey);
   const entry_timestamp = body.entry_timestamp
     ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime())
     : nowFrappeDatetime();
@@ -167,11 +209,14 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId)
   });
 
   const incoming = dedupeLogsById(logsFromSyncBody(body));
-  if (incoming.length === 0) {
+  const existingLogs = collectLogsFromExistingRows(existingRows, tool_key);
+  const mergedLogs = mergeLogsPreferIncoming(existingLogs, incoming);
+
+  if (mergedLogs.length === 0) {
     return withoutTool;
   }
 
-  return [...withoutTool, mapToolSnapshotRow(body, parentUserExternalId, incoming)];
+  return [...withoutTool, mapToolSnapshotRow(body, parentUserExternalId, mergedLogs)];
 }
 
 function buildHealthEntryRowsForToolSync(body, parentUserExternalId) {
@@ -184,6 +229,7 @@ module.exports = {
   pickToolSnapshotExternalId,
   logsFromSyncBody,
   dedupeLogsById,
+  mergeLogsPreferIncoming,
   collectLogsFromExistingRows,
   mapToolSnapshotRow,
   buildHealthEntryRowsForToolSync,

@@ -55,6 +55,21 @@ function normalizeHealthToolKey(toolKey) {
   return LEGACY_TOOL_KEY_ALIASES[key] ?? key;
 }
 
+/**
+ * Frappe `Mobile App Health Entry.tool_key` Select options (canonical app keys
+ * may not exist on the DocType yet). `health_entry_external_id` stays canonical
+ * (`health_motor_function`, etc.).
+ */
+const FRAPPE_HEALTH_TOOL_KEY = {
+  motor_function: "paralysis_motor_function",
+  neuro_function: "paralysis_neuro_function",
+};
+
+function toFrappeHealthToolKey(canonicalToolKey) {
+  const key = normalizeHealthToolKey(canonicalToolKey);
+  return FRAPPE_HEALTH_TOOL_KEY[key] ?? key;
+}
+
 function isKnownHealthToolKey(toolKey) {
   if (toolKey == null) return false;
   return HEALTH_TOOL_KEYS.has(String(toolKey).trim());
@@ -64,6 +79,8 @@ module.exports = {
   HEALTH_TOOL_KEYS,
   CANONICAL_MOTOR_NEURO_KEYS,
   LEGACY_TOOL_KEY_ALIASES,
+  FRAPPE_HEALTH_TOOL_KEY,
   normalizeHealthToolKey,
+  toFrappeHealthToolKey,
   isKnownHealthToolKey,
 };
