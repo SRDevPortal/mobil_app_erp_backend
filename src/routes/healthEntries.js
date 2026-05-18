@@ -8,7 +8,11 @@ const {
   dedupeLogsById,
 } = require("../services/healthEntryRows");
 const { pickExternalId, pickPhone } = require("../normalize");
-const { HEALTH_TOOL_KEYS, isKnownHealthToolKey } = require("../healthToolKeys");
+const {
+  HEALTH_TOOL_KEYS,
+  isKnownHealthToolKey,
+  normalizeHealthToolKey,
+} = require("../healthToolKeys");
 
 const router = express.Router();
 
@@ -35,17 +39,19 @@ function stripRootUndefined(obj) {
 router.post("/", async (req, res) => {
   try {
     const body = req.body || {};
-    const tool_key = body.tool_key != null ? String(body.tool_key).trim() : "";
-    if (!tool_key) {
+    const rawToolKey = body.tool_key != null ? String(body.tool_key).trim() : "";
+    if (!rawToolKey) {
       return res.status(400).json({ success: false, message: "tool_key is required" });
     }
-    if (!isKnownHealthToolKey(tool_key)) {
+    if (!isKnownHealthToolKey(rawToolKey)) {
       return res.status(400).json({
         success: false,
-        message: `Unknown tool_key: ${tool_key}`,
+        message: `Unknown tool_key: ${rawToolKey}`,
         allowed_tool_keys: [...HEALTH_TOOL_KEYS].sort(),
       });
     }
+    const tool_key = normalizeHealthToolKey(rawToolKey);
+    body.tool_key = tool_key;
 
     const userRow = await findMobileAppUser(body, {}, {});
     const parentExternalId =

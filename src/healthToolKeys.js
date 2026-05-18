@@ -18,25 +18,52 @@ const HEALTH_TOOL_KEYS = new Set([
   "skin_daily_snapshot",
   "skin_symptoms_tracking",
   "skin_patch_tracking",
-  "paralysis_motor_function",
-  "paralysis_neuro_function",
+  "motor_function",
+  "neuro_function",
   "diet_lifestyle_data",
   "exercise_support_data",
   "fertility_reports_data",
   "varicocele_data",
   "vaginal_health_data",
-  "motor_log_data",
-  "functional_log_data",
   "cancer_symptoms_tracker",
   "cancer_energy_recovery",
   "diabetes_health_data",
   "bowel_stool_data",
   "ibs_symptoms_data",
+  // Legacy keys (still accepted for existing ERP rows; app normalizes on read)
+  "paralysis_motor_function",
+  "paralysis_neuro_function",
+  "paralysis_mobility_gait",
+  "motor_log_data",
+  "functional_log_data",
 ]);
+
+/** Canonical keys written for new saves from the app. */
+const CANONICAL_MOTOR_NEURO_KEYS = new Set(["motor_function", "neuro_function"]);
+
+const LEGACY_TOOL_KEY_ALIASES = {
+  paralysis_motor_function: "motor_function",
+  paralysis_mobility_gait: "motor_function",
+  paralysis_neuro_function: "neuro_function",
+  motor_log_data: "motor_function",
+  functional_log_data: "neuro_function",
+};
+
+function normalizeHealthToolKey(toolKey) {
+  if (toolKey == null) return "";
+  const key = String(toolKey).trim();
+  return LEGACY_TOOL_KEY_ALIASES[key] ?? key;
+}
 
 function isKnownHealthToolKey(toolKey) {
   if (toolKey == null) return false;
   return HEALTH_TOOL_KEYS.has(String(toolKey).trim());
 }
 
-module.exports = { HEALTH_TOOL_KEYS, isKnownHealthToolKey };
+module.exports = {
+  HEALTH_TOOL_KEYS,
+  CANONICAL_MOTOR_NEURO_KEYS,
+  LEGACY_TOOL_KEY_ALIASES,
+  normalizeHealthToolKey,
+  isKnownHealthToolKey,
+};
