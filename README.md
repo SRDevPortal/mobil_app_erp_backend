@@ -42,7 +42,7 @@ npm run dev
 | `POST` | `/api/v1/profiles/sync` | Upsert **`profiles`** child via `users_full_sync` |
 | `POST` | `/api/v1/diseases/sync` | Upsert **Mobile App Disease** master |
 | `POST` | `/api/v1/disease-selections` | Create **Mobile App User Disease Selection** |
-| `POST` | `/api/v1/health-entries` | Sync **`health_entries`** via `users_full_sync` (**one ERP row per log**; POST body still sends full list per `tool_key`) |
+| `POST` | `/api/v1/health-entries` | Sync **`health_entries`** via `users_full_sync` (**one row per `tool_key`**, all logs in `data_json` array) |
 | `POST` | `/api/v1/prescriptions` | Create **Mobile App Prescription** |
 | `POST` | `/api/v1/doctors/sync` | Upsert **Mobile App Doctor** |
 | `POST` | `/api/v1/appointments` | Upsert **`appointments`** child via `users_full_sync` (by `booking_id` / `appointment_external_id`) |

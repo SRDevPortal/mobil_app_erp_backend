@@ -4,8 +4,8 @@ const { DOCTYPE } = require("../config");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const {
   mergeHealthEntriesForToolSync,
-  buildHealthEntryRowsForToolSync,
   logsFromSyncBody,
+  dedupeLogsById,
 } = require("../services/healthEntryRows");
 const { pickExternalId, pickPhone } = require("../normalize");
 const { HEALTH_TOOL_KEYS, isKnownHealthToolKey } = require("../healthToolKeys");
@@ -24,14 +24,13 @@ function stripRootUndefined(obj) {
  * Sync health tool logs on **Mobile App User** → **`health_entries`** child table
  * via Frappe **`mobile_app.api.v1.users_full_sync`**.
  *
- * **One ERP row per in-app log** (`health_entry_external_id` = `health_{tool_key}_{logId}`).
- * The app still sends the full list for a tool in `data_json`; this route replaces all rows
- * for that `tool_key` with one child row per list item (supports add + delete via full list).
+ * **One ERP row per `tool_key`** — all logs for that tool are stored in `data_json` (JSON array).
+ * The app sends the full list after each save/delete; this route updates that single row.
  *
  * Body (Flutter `BackendErpSync.syncHealthTool`):
  * - `external_id` / `customer_id` — Supabase user UUID
- * - `tool_key` — e.g. `bp_data`, `vaginal_health_data`
- * - `data_json` — full log **array** for that tool after save/delete
+ * - `tool_key` — e.g. `bp_data`
+ * - `data_json` — full log array for that tool (`[]` removes the tool row)
  */
 router.post("/", async (req, res) => {
   try {
@@ -58,11 +57,11 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const newRows = buildHealthEntryRowsForToolSync(body, parentExternalId);
-    if (logsFromSyncBody(body).length > 0 && newRows.length === 0) {
+    const incomingLogs = logsFromSyncBody(body);
+    if (body.data_json !== undefined && !Array.isArray(body.data_json) && incomingLogs.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "data_json must be an array of log objects or a single log object",
+        message: "data_json must be an array of log objects (or omit for empty)",
       });
     }
 
@@ -82,6 +81,7 @@ router.post("/", async (req, res) => {
     }
 
     const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
+    const entriesCount = dedupeLogsById(incomingLogs).length;
 
     let parsed;
     try {
@@ -113,8 +113,8 @@ router.post("/", async (req, res) => {
         data: {
           ...data,
           tool_key,
-          entries_count: newRows.length,
-          log_row_ids: newRows.map((r) => r.health_entry_external_id).filter(Boolean),
+          health_entry_external_id: `health_${tool_key}`,
+          entries_count: entriesCount,
         },
       });
     }
