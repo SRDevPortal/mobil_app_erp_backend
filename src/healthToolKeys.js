@@ -14,7 +14,7 @@ const HEALTH_TOOL_KEYS = new Set([
   "cbc_reports_data",
   "liver_body_data",
   "urine_tracker_data",
-  "lab_reports_data",
+  "lft_reports_data",
   "skin_daily_snapshot",
   "skin_symptoms_tracking",
   "skin_patch_tracking",
@@ -36,6 +36,7 @@ const HEALTH_TOOL_KEYS = new Set([
   "paralysis_mobility_gait",
   "motor_log_data",
   "functional_log_data",
+  "lab_reports_data",
 ]);
 
 const CANONICAL_MOTOR_NEURO_KEYS = new Set(["motor_function", "neuro_function"]);
@@ -46,6 +47,7 @@ const LEGACY_TOOL_KEY_ALIASES = {
   paralysis_neuro_function: "neuro_function",
   motor_log_data: "motor_function",
   functional_log_data: "neuro_function",
+  lab_reports_data: "lft_reports_data",
 };
 
 /** Old ERP rows to merge/remove when syncing canonical motor/neuro tools. */
@@ -58,6 +60,9 @@ const LEGACY_FRAPPE_ROW_IDENTITIES = {
   neuro_function: [
     { tool_key: "paralysis_neuro_function", health_entry_external_id: "health_paralysis_neuro_function" },
     { tool_key: "functional_log_data", health_entry_external_id: "health_functional_log_data" },
+  ],
+  lft_reports_data: [
+    { tool_key: "lab_reports_data", health_entry_external_id: "health_lab_reports_data" },
   ],
 };
 
