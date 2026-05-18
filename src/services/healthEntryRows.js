@@ -153,14 +153,11 @@ function collectLogsFromExistingRows(existingRows, toolKey) {
   return logs;
 }
 
-function mapToolSnapshotRow(body = {}, parentUserExternalId, logs, options = {}) {
+function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
   const canonicalToolKey = normalizeHealthToolKey(
     body.tool_key != null ? String(body.tool_key).trim() : "",
   );
-  const identity = frappeHealthEntryIdentity(canonicalToolKey, {
-    useCanonical: options.useCanonicalFrappeKeys,
-  });
-  const { tool_key, health_entry_external_id } = identity;
+  const { tool_key, health_entry_external_id } = frappeHealthEntryIdentity(canonicalToolKey);
   const entry_timestamp = body.entry_timestamp
     ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime())
     : nowFrappeDatetime();
@@ -189,7 +186,7 @@ function mapToolSnapshotRow(body = {}, parentUserExternalId, logs, options = {})
  * Keep one `health_entries` row per `tool_key`; store every log in `data_json` array.
  * Removes duplicate / per-log rows for the same tool from older syncs.
  */
-function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId, options = {}) {
+function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId) {
   const tool_key = normalizeHealthToolKey(
     body.tool_key != null ? String(body.tool_key).trim() : "",
   );
@@ -208,10 +205,7 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId,
     return withoutTool;
   }
 
-  return [
-    ...withoutTool,
-    mapToolSnapshotRow(body, parentUserExternalId, mergedLogs, options),
-  ];
+  return [...withoutTool, mapToolSnapshotRow(body, parentUserExternalId, mergedLogs)];
 }
 
 function buildHealthEntryRowsForToolSync(body, parentUserExternalId) {

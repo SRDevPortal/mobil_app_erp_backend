@@ -30,7 +30,7 @@ const HEALTH_TOOL_KEYS = new Set([
   "diabetes_health_data",
   "bowel_stool_data",
   "ibs_symptoms_data",
-  // Legacy keys (still accepted for existing ERP rows; app normalizes on read)
+  // Legacy keys (accepted on POST; normalized to canonical; merged on sync)
   "paralysis_motor_function",
   "paralysis_neuro_function",
   "paralysis_mobility_gait",
@@ -38,7 +38,6 @@ const HEALTH_TOOL_KEYS = new Set([
   "functional_log_data",
 ]);
 
-/** Canonical keys used by the Flutter app for new saves. */
 const CANONICAL_MOTOR_NEURO_KEYS = new Set(["motor_function", "neuro_function"]);
 
 const LEGACY_TOOL_KEY_ALIASES = {
@@ -49,26 +48,18 @@ const LEGACY_TOOL_KEY_ALIASES = {
   functional_log_data: "neuro_function",
 };
 
-/**
- * Frappe `Mobile App Health Entry` row identity.
- * `tool_key` and `health_entry_external_id` must match what the DocType Select allows.
- * Set env `ERP_MOTOR_NEURO_CANONICAL_FRAPPE_KEYS=1` after adding motor_function / neuro_function on bench.
- */
-const LEGACY_FRAPPE_HEALTH_ENTRY_IDENTITY = {
-  motor_function: {
-    tool_key: "paralysis_motor_function",
-    health_entry_external_id: "health_paralysis_motor_function",
-  },
-  neuro_function: {
-    tool_key: "paralysis_neuro_function",
-    health_entry_external_id: "health_paralysis_neuro_function",
-  },
+/** Old ERP rows to merge/remove when syncing canonical motor/neuro tools. */
+const LEGACY_FRAPPE_ROW_IDENTITIES = {
+  motor_function: [
+    { tool_key: "paralysis_motor_function", health_entry_external_id: "health_paralysis_motor_function" },
+    { tool_key: "paralysis_mobility_gait", health_entry_external_id: "health_paralysis_mobility_gait" },
+    { tool_key: "motor_log_data", health_entry_external_id: "health_motor_log_data" },
+  ],
+  neuro_function: [
+    { tool_key: "paralysis_neuro_function", health_entry_external_id: "health_paralysis_neuro_function" },
+    { tool_key: "functional_log_data", health_entry_external_id: "health_functional_log_data" },
+  ],
 };
-
-function useCanonicalFrappeMotorNeuroKeys() {
-  const v = process.env.ERP_MOTOR_NEURO_CANONICAL_FRAPPE_KEYS;
-  return v === "1" || v === "true" || v === "yes";
-}
 
 function normalizeHealthToolKey(toolKey) {
   if (toolKey == null) return "";
@@ -76,46 +67,25 @@ function normalizeHealthToolKey(toolKey) {
   return LEGACY_TOOL_KEY_ALIASES[key] ?? key;
 }
 
-/**
- * @param {string} canonicalToolKey - e.g. motor_function
- * @param {{ useCanonical?: boolean }} [options]
- * @returns {{ canonical_tool_key: string, tool_key: string, health_entry_external_id: string }}
- */
-function frappeHealthEntryIdentity(canonicalToolKey, options = {}) {
+/** Canonical Frappe child row identity (matches Mobile App Health Entry Select). */
+function frappeHealthEntryIdentity(canonicalToolKey) {
   const canonical = normalizeHealthToolKey(canonicalToolKey);
-  const preferCanonical =
-    options.useCanonical === true ||
-    (options.useCanonical !== false && useCanonicalFrappeMotorNeuroKeys());
-
-  if (preferCanonical || !LEGACY_FRAPPE_HEALTH_ENTRY_IDENTITY[canonical]) {
-    return {
-      canonical_tool_key: canonical,
-      tool_key: canonical,
-      health_entry_external_id: `health_${canonical}`,
-    };
-  }
-
-  const legacy = LEGACY_FRAPPE_HEALTH_ENTRY_IDENTITY[canonical];
   return {
     canonical_tool_key: canonical,
-    tool_key: legacy.tool_key,
-    health_entry_external_id: legacy.health_entry_external_id,
+    tool_key: canonical,
+    health_entry_external_id: `health_${canonical}`,
   };
 }
 
-/** All Frappe row shapes that map to one canonical app tool (for merge / dedupe). */
+/** Canonical + legacy ERP rows that belong to one app tool (for merge/dedupe). */
 function frappeIdentitiesForCanonicalTool(canonicalToolKey) {
   const canonical = normalizeHealthToolKey(canonicalToolKey);
-  const canonicalId = frappeHealthEntryIdentity(canonical, { useCanonical: true });
-  const legacyId = frappeHealthEntryIdentity(canonical, { useCanonical: false });
-  const out = [canonicalId];
-  if (
-    legacyId.tool_key !== canonicalId.tool_key ||
-    legacyId.health_entry_external_id !== canonicalId.health_entry_external_id
-  ) {
-    out.push(legacyId);
-  }
-  return out;
+  const primary = frappeHealthEntryIdentity(canonical);
+  const legacy = LEGACY_FRAPPE_ROW_IDENTITIES[canonical] || [];
+  return [
+    primary,
+    ...legacy.map((row) => ({ canonical_tool_key: canonical, ...row })),
+  ];
 }
 
 function isKnownHealthToolKey(toolKey) {
@@ -127,10 +97,9 @@ module.exports = {
   HEALTH_TOOL_KEYS,
   CANONICAL_MOTOR_NEURO_KEYS,
   LEGACY_TOOL_KEY_ALIASES,
-  LEGACY_FRAPPE_HEALTH_ENTRY_IDENTITY,
+  LEGACY_FRAPPE_ROW_IDENTITIES,
   normalizeHealthToolKey,
   frappeHealthEntryIdentity,
   frappeIdentitiesForCanonicalTool,
-  useCanonicalFrappeMotorNeuroKeys,
   isKnownHealthToolKey,
 };
