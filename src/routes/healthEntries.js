@@ -2,7 +2,12 @@ const express = require("express");
 const { erpCallMethod, erpGetDoc } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
-const { mapHealthEntryChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
+const {
+  mergeHealthEntriesForToolSync,
+  buildHealthEntryRowsForToolSync,
+  logsFromSyncBody,
+} = require("../services/healthEntryRows");
+const { pickExternalId, pickPhone } = require("../normalize");
 const { HEALTH_TOOL_KEYS, isKnownHealthToolKey } = require("../healthToolKeys");
 
 const router = express.Router();
@@ -16,17 +21,17 @@ function stripRootUndefined(obj) {
 }
 
 /**
- * Upsert one health-tool snapshot on **Mobile App User** → **`health_entries`** child table
- * via Frappe **`mobile_app.api.v1.users_full_sync`** (not `/api/resource/Mobile App Health Entry`
- * when rows live only as child items).
+ * Sync health tool logs on **Mobile App User** → **`health_entries`** child table
+ * via Frappe **`mobile_app.api.v1.users_full_sync`**.
+ *
+ * **One ERP row per in-app log** (`health_entry_external_id` = `health_{tool_key}_{logId}`).
+ * The app still sends the full list for a tool in `data_json`; this route replaces all rows
+ * for that `tool_key` with one child row per list item (supports add + delete via full list).
  *
  * Body (Flutter `BackendErpSync.syncHealthTool`):
  * - `external_id` / `customer_id` — Supabase user UUID
  * - `tool_key` — e.g. `bp_data`, `vaginal_health_data`
- * - `entry_id` — client sync id (`local_{ms}_{hash}`)
- * - `entry_timestamp` — ISO 8601 UTC
- * - `data_json` — **full** log array for that tool after save
- * - `source` — `app` (default)
+ * - `data_json` — full log **array** for that tool after save/delete
  */
 router.post("/", async (req, res) => {
   try {
@@ -53,11 +58,11 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const newRow = mapHealthEntryChildRowForFullSync(body, parentExternalId);
-    if (!newRow?.health_entry_external_id) {
+    const newRows = buildHealthEntryRowsForToolSync(body, parentExternalId);
+    if (logsFromSyncBody(body).length > 0 && newRows.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "health_entry_external_id could not be derived from tool_key",
+        message: "data_json must be an array of log objects or a single log object",
       });
     }
 
@@ -76,16 +81,7 @@ router.post("/", async (req, res) => {
       }
     }
 
-    const extId = newRow.health_entry_external_id;
-    const next = existing.filter((r) => {
-      const rTool = r.tool_key != null ? String(r.tool_key).trim() : "";
-      const rExt =
-        r.health_entry_external_id != null ? String(r.health_entry_external_id).trim() : "";
-      if (tool_key && rTool === tool_key) return false;
-      if (extId && rExt === extId) return false;
-      return true;
-    });
-    next.push(newRow);
+    const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
 
     let parsed;
     try {
@@ -117,12 +113,8 @@ router.post("/", async (req, res) => {
         data: {
           ...data,
           tool_key,
-          health_entry_external_id: extId,
-          entries_count: Array.isArray(body.data_json)
-            ? body.data_json.length
-            : Array.isArray(body.data)
-              ? body.data.length
-              : undefined,
+          entries_count: newRows.length,
+          log_row_ids: newRows.map((r) => r.health_entry_external_id).filter(Boolean),
         },
       });
     }

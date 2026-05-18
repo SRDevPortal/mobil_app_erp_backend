@@ -437,22 +437,22 @@ curl -sS -X POST "http://localhost:3101/api/v1/disease-selections" \
 
 ---
 
-## 8) Upsert health tool snapshot (`health_entries` child table)
+## 8) Sync health tool logs (`health_entries` child table)
 
 **`POST /api/v1/health-entries`** → **201**, **400**, or **502**
 
-Upserts one row per **`tool_key`** on **Mobile App User** → **`health_entries`** via **`mobile_app.api.v1.users_full_sync`** (same pattern as profiles / appointments). There is **no** Resource API fallback when health rows exist only as child items.
+Syncs logs for one **`tool_key`** on **Mobile App User** → **`health_entries`** via **`mobile_app.api.v1.users_full_sync`**. **One child row per in-app log** (not one row per tool). Legacy rows (`health_{tool_key}` + array in `data_json`) are expanded on the next sync.
 
 | Field | Required | Notes |
 |--------|----------|--------|
 | `external_id` | Yes | Supabase user UUID (alias: `customer_id`, `id`) |
 | `tool_key` | Yes | e.g. `bp_data`, `vaginal_health_data` — see `src/healthToolKeys.js` |
-| `entry_id` | No | Client sync id, e.g. `local_{ms}_{hash}` |
-| `entry_timestamp` | No | ISO 8601 UTC; defaults to now |
-| `data_json` | No | **Full** in-memory log **array** for that tool after save (not a single reading only) |
+| `entry_id` | No | Client sync batch id, e.g. `local_{ms}_{hash}` |
+| `entry_timestamp` | No | ISO 8601 UTC; defaults to now (per-row timestamps come from each log when present) |
+| `data_json` | No | **Full** in-memory log **array** for that tool after save or delete; `[]` clears all rows for the tool |
 | `source` | No | Default `app` |
 
-Stable row id: **`health_entry_external_id`** = `health_{tool_key}` (override with `health_entry_external_id` in body if needed).
+Per-log stable id: **`health_entry_external_id`** = `health_{tool_key}_{logId}` where `logId` is the log’s `id` field.
 
 ```bash
 curl -sS -X POST "http://localhost:3101/api/v1/health-entries" \
@@ -469,8 +469,8 @@ curl -sS -X POST "http://localhost:3101/api/v1/health-entries" \
   "data": {
     "external_id": "550e8400-e29b-41d4-a716-446655440000",
     "tool_key": "bp_data",
-    "health_entry_external_id": "health_bp_data",
-    "entries_count": 1
+    "entries_count": 1,
+    "log_row_ids": ["health_bp_data_1715500800000"]
   }
 }
 ```
