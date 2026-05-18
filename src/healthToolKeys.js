@@ -24,6 +24,7 @@ const HEALTH_TOOL_KEYS = new Set([
   "exercise_support_data",
   "fertility_reports_data",
   "varicocele_data",
+  "cycle_ovulation_tracker",
   "vaginal_health_data",
   "cancer_symptoms_tracker",
   "cancer_energy_recovery",
@@ -63,6 +64,9 @@ const LEGACY_FRAPPE_ROW_IDENTITIES = {
   ],
   lft_reports_data: [
     { tool_key: "lab_reports_data", health_entry_external_id: "health_lab_reports_data" },
+  ],
+  cycle_ovulation_tracker: [
+    { tool_key: "varicocele_data", health_entry_external_id: "health_varicocele_data" },
   ],
 };
 

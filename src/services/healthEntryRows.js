@@ -110,6 +110,34 @@ function rowShouldRemoveForCanonicalToolSync(row, canonicalToolKey) {
   return false;
 }
 
+function isCycleOvulationLog(log) {
+  return log != null && typeof log === "object" && ("cycle_length" in log || "lmp_timestamp" in log);
+}
+
+function isMaleVaricoceleLog(log) {
+  if (log == null || typeof log !== "object") return false;
+  return (
+    (log.usg_file != null && String(log.usg_file).trim() !== "") ||
+    (log.doppler_file != null && String(log.doppler_file).trim() !== "") ||
+    log.usg_extracted != null ||
+    log.doppler_extracted != null ||
+    log.condition_extracted != null
+  );
+}
+
+function logBelongsToCanonicalTool(log, canonicalToolKey) {
+  const tool = normalizeHealthToolKey(String(canonicalToolKey).trim());
+  const cycle = isCycleOvulationLog(log);
+  const male = isMaleVaricoceleLog(log);
+  if (tool === "cycle_ovulation_tracker") return cycle && !male;
+  if (tool === "varicocele_data") return !cycle || male;
+  return true;
+}
+
+function filterLogsForCanonicalTool(logs, canonicalToolKey) {
+  return (logs || []).filter((log) => logBelongsToCanonicalTool(log, canonicalToolKey));
+}
+
 /** Read logs from any existing row for this tool (snapshot array or legacy per-log rows). */
 function collectLogsFromExistingRows(existingRows, toolKey) {
   const tool = normalizeHealthToolKey(String(toolKey).trim());
@@ -150,7 +178,7 @@ function collectLogsFromExistingRows(existingRows, toolKey) {
     }
   }
 
-  return logs;
+  return filterLogsForCanonicalTool(logs, tool);
 }
 
 function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
@@ -197,9 +225,12 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId)
     return !rowShouldRemoveForCanonicalToolSync(r, tool_key);
   });
 
-  const incoming = dedupeLogsById(logsFromSyncBody(body));
+  const incoming = filterLogsForCanonicalTool(dedupeLogsById(logsFromSyncBody(body)), tool_key);
   const existingLogs = collectLogsFromExistingRows(existingRows, tool_key);
-  const mergedLogs = mergeLogsPreferIncoming(existingLogs, incoming);
+  const mergedLogs = filterLogsForCanonicalTool(
+    mergeLogsPreferIncoming(existingLogs, incoming),
+    tool_key,
+  );
 
   if (mergedLogs.length === 0) {
     return withoutTool;
@@ -209,7 +240,11 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId)
 }
 
 function buildHealthEntryRowsForToolSync(body, parentUserExternalId) {
-  const row = mapToolSnapshotRow(body, parentUserExternalId, logsFromSyncBody(body));
+  const tool_key = normalizeHealthToolKey(
+    body.tool_key != null ? String(body.tool_key).trim() : "",
+  );
+  const logs = filterLogsForCanonicalTool(logsFromSyncBody(body), tool_key);
+  const row = mapToolSnapshotRow(body, parentUserExternalId, logs);
   return row.health_entry_external_id ? [row] : [];
 }
 
