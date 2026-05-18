@@ -1,5 +1,5 @@
 const { frappeJsonField, toFrappeDatetime, nowFrappeDatetime } = require("../normalize");
-const { normalizeHealthToolKey, toFrappeHealthToolKey } = require("../healthToolKeys");
+const { normalizeHealthToolKey } = require("../healthToolKeys");
 
 function stripUndefined(obj) {
   const out = {};
@@ -145,7 +145,7 @@ function mapToolSnapshotRow(body = {}, parentUserExternalId, logs) {
     body.tool_key != null ? String(body.tool_key).trim() : "",
   );
   const health_entry_external_id = pickToolSnapshotExternalId(canonicalToolKey);
-  const tool_key = toFrappeHealthToolKey(canonicalToolKey);
+  const tool_key = canonicalToolKey;
   const entry_timestamp = body.entry_timestamp
     ? toFrappeDatetime(body.entry_timestamp, nowFrappeDatetime())
     : nowFrappeDatetime();
