@@ -20,7 +20,6 @@ const healthEntriesRouter = require("./routes/healthEntries");
 const prescriptionsRouter = require("./routes/prescriptions");
 const doctorsRouter = require("./routes/doctors");
 const appointmentsRouter = require("./routes/appointments");
-const appointmentNotificationsRouter = require("./routes/appointmentNotifications");
 const notificationsRouter = require("./routes/notifications");
 const supportTicketsRouter = require("./routes/supportTickets");
 const webhookEventsRouter = require("./routes/webhookEvents");
@@ -64,7 +63,6 @@ function createApp() {
   app.use("/api/v1/prescriptions", prescriptionsRouter);
   app.use("/api/v1/doctors", doctorsRouter);
   app.use("/api/v1/appointments", appointmentsRouter);
-  app.use("/api/v1/appointment-notifications", appointmentNotificationsRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/support-tickets", supportTicketsRouter);
   app.use("/api/v1/webhook-events", webhookEventsRouter);
