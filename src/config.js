@@ -24,6 +24,11 @@ const PORT = Number(process.env.PORT || 3101);
 /** Supabase project (for POST /api/auth/verify-supabase — validates user JWT like n8n). */
 const SUPABASE_URL = trim(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = normalizeSecret(process.env.SUPABASE_ANON_KEY || "");
+const ONESIGNAL_APP_ID = normalizeSecret(process.env.ONESIGNAL_APP_ID || "");
+const ONESIGNAL_REST_API_KEY = normalizeSecret(
+  process.env.ONESIGNAL_REST_API_KEY || "",
+);
+const FCM_SERVER_KEY = normalizeSecret(process.env.FCM_SERVER_KEY || "");
 
 const DOCTYPE = {
   MOBILE_APP_USER: trim(process.env.DOCTYPE_MOBILE_APP_USER || "Mobile App User"),
@@ -70,6 +75,9 @@ module.exports = {
   PORT,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  ONESIGNAL_APP_ID,
+  ONESIGNAL_REST_API_KEY,
+  FCM_SERVER_KEY,
   DOCTYPE,
   erpAuthHeader,
 };

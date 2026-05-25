@@ -471,6 +471,11 @@ function mapAppointmentChildRowForFullSync(body = {}, parentUserExternalId) {
     scheduled_at: body.scheduled_at,
     is_removed_by_user: body.is_removed_by_user,
     updated_at: body.updated_at,
+    oneSignalUserId: body.oneSignalUserId,
+    onesignal_user_id: body.onesignal_user_id || body.player_id,
+    oneSignalPushToken: body.oneSignalPushToken,
+    fcmToken: body.fcmToken,
+    fcm_token: body.fcm_token,
     appointment_datetime_legacy: pickAppointmentDatetime(body),
   });
   const payload_json =

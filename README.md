@@ -30,6 +30,9 @@ npm run dev
 | `ERP_BASE_URL` | Frappe site root, e.g. `https://your-site.com` |
 | `ERP_TOKEN` | `api_key:api_secret` when `ERP_AUTH_SCHEME=token`, or bearer token |
 | `ERP_AUTH_SCHEME` | `token` (default) or `bearer` |
+| `ONESIGNAL_APP_ID` | OneSignal app id for appointment push notifications |
+| `ONESIGNAL_REST_API_KEY` | OneSignal REST API key, backend only |
+| `FCM_SERVER_KEY` | Firebase Cloud Messaging server key, backend only |
 | `DOCTYPE_*` | Override Frappe DocType titles if needed |
 
 ## Routes (aligned with filds.md + Frappe fields)
@@ -46,6 +49,8 @@ npm run dev
 | `POST` | `/api/v1/prescriptions` | Create **Mobile App Prescription** |
 | `POST` | `/api/v1/doctors/sync` | Upsert **Mobile App Doctor** |
 | `POST` | `/api/v1/appointments` | Upsert **`appointments`** child via `users_full_sync` (by `booking_id` / `appointment_external_id`) |
+| `POST` | `/api/v1/appointment-notifications/send` | Send appointment push via OneSignal/FCM; no in-app notification record |
+| `POST` | `/api/v1/appointment-notifications/reminders/run` | Cron endpoint: scans ERP appointments and sends due reminders |
 | `POST` | `/api/v1/notifications` | Create **Mobile App Notification** (`type` → `notification_type`) |
 | `POST` | `/api/v1/support-tickets` | Create **Mobile App Support Ticket** (`name` → `requester_name`) |
 | `POST` | `/api/v1/webhook-events` | Create **Mobile App Webhook Event**; optional user via `customer_id` / `customer_email` / normal user keys |
