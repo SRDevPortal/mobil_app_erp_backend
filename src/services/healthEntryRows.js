@@ -226,11 +226,13 @@ function mergeHealthEntriesForToolSync(existingRows, body, parentUserExternalId)
   });
 
   const incoming = filterLogsForCanonicalTool(dedupeLogsById(logsFromSyncBody(body)), tool_key);
-  const existingLogs = collectLogsFromExistingRows(existingRows, tool_key);
-  const mergedLogs = filterLogsForCanonicalTool(
-    mergeLogsPreferIncoming(existingLogs, incoming),
-    tool_key,
-  );
+  const hasSnapshotPayload = Array.isArray(body.data_json) || Array.isArray(body.data);
+  const mergedLogs = hasSnapshotPayload
+    ? incoming
+    : filterLogsForCanonicalTool(
+        mergeLogsPreferIncoming(collectLogsFromExistingRows(existingRows, tool_key), incoming),
+        tool_key,
+      );
 
   if (mergedLogs.length === 0) {
     return withoutTool;
