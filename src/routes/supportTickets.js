@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const { DOCTYPE } = require("../config");
-const { erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
+const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, pickExternalId } = require("../normalize");
 
@@ -55,6 +55,16 @@ const MESSAGE_FIELDS = [
 const MESSAGE_DOCTYPE =
   (process.env.DOCTYPE_MOBILE_APP_SUPPORT_TICKET_MESSAGE || process.env.ERP_MESSAGE_DOCTYPE || "").trim();
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
+const SUPPORT_LOOKUP_METHODS = [
+  "mobile_app.api.v1.support_tickets_lookup",
+  "mobile_app.api.v1.support_ticket_lookup",
+  "mobile_app.api.v1.support_tickets",
+  "mobile_app.api.v1.tickets_lookup",
+];
+const SUPPORT_SYNC_METHODS = [
+  "mobile_app.api.v1.support_tickets_sync",
+  "mobile_app.api.v1.support_ticket_sync",
+];
 
 function toApiStatus(value) {
   const normalized = (value || "").toString().trim().toLowerCase().replace(/\s+/g, "_");
@@ -88,27 +98,63 @@ function safeJsonParse(value, fallback) {
 
 function mapTicket(doc = {}) {
   return {
-    id: doc.name,
-    ticket_number: doc.ticket_number || doc.name,
-    user_id: doc.external_id || doc.user_id || null,
-    user_name: doc.requester_name || doc.user_name || doc.customer_name || "",
-    user_email: doc.email || doc.user_email || "",
-    user_phone: doc.phone || doc.user_phone || "",
-    subject: doc.subject || "",
-    description: doc.description || "",
+    id: doc.name || doc.id || doc.ticket_number || doc.record_external_id,
+    ticket_number: doc.ticket_number || doc.name || doc.id || doc.record_external_id,
+    user_id: doc.external_id || doc.user_id || doc.patient_id || doc.mobile_user_id || null,
+    user_name: doc.requester_name || doc.user_name || doc.customer_name || doc.patient_name || doc.name_text || "",
+    user_email: doc.email || doc.user_email || doc.email_id || doc.raised_by || "",
+    user_phone: doc.phone || doc.user_phone || doc.mobile_number || "",
+    subject: doc.subject || doc.title || doc.record_type || "Support Ticket",
+    description: doc.description || doc.message || doc.notes || doc.details || "",
     status: toApiStatus(doc.status),
     priority: (doc.priority || "medium").toString().trim().toLowerCase(),
     category: doc.category || null,
     assigned_to: doc.assigned_to || null,
     assigned_to_name: doc.assigned_to_name || null,
-    created_at: toIso(doc.created_at || doc.creation, new Date().toISOString()),
-    updated_at: toIso(doc.updated_at || doc.modified, new Date().toISOString()),
+    created_at: toIso(doc.created_at || doc.creation || doc.timestamp, new Date().toISOString()),
+    updated_at: toIso(doc.updated_at || doc.modified || doc.timestamp, new Date().toISOString()),
     resolved_at: toIso(doc.resolved_at, null),
     closed_at: toIso(doc.closed_at, null),
     metadata: safeJsonParse(doc.metadata, null),
     unread_message_count: 0,
     agent_message_count: 0,
   };
+}
+
+function unwrapMethodData(parsed) {
+  const msg = parsed?.message;
+  if (msg && typeof msg === "object") {
+    if (msg.success === false) return null;
+    return msg.data ?? msg.tickets ?? msg.ticket ?? msg;
+  }
+  return parsed?.data ?? parsed?.tickets ?? parsed?.ticket ?? null;
+}
+
+function ticketRowsFromMethodData(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.tickets)) return data.tickets;
+  if (Array.isArray(data?.support_tickets)) return data.support_tickets;
+  if (Array.isArray(data?.rows)) return data.rows;
+  if (Array.isArray(data?.engagement_items)) {
+    return data.engagement_items.filter((row) => /support|ticket/i.test(String(row.record_type || row.type || "")));
+  }
+  if (data && typeof data === "object" && (data.name || data.subject)) return [data];
+  return [];
+}
+
+async function callFirstSupportMethod(methods, options) {
+  let firstError = null;
+  for (const method of methods) {
+    try {
+      const parsed = await erpCallMethod(method, { ...options, appToken: true });
+      const data = unwrapMethodData(parsed);
+      return { method, data };
+    } catch (e) {
+      firstError = firstError || e;
+      if (e.status && e.status !== 404) break;
+    }
+  }
+  throw firstError || new Error("No support method configured");
 }
 
 function mapMessage(doc = {}) {
@@ -140,6 +186,31 @@ function addQueries(queries, fields, value, status) {
 }
 
 async function findTickets({ userId, userLinkName, userEmail, userPhone, status, limit, offset }) {
+  try {
+    const { data } = await callFirstSupportMethod(SUPPORT_LOOKUP_METHODS, {
+      method: "GET",
+      query: {
+        external_id: userId,
+        user_id: userId,
+        mobile_user_id: userLinkName,
+        email: userEmail,
+        phone: userPhone,
+        status,
+        limit,
+        offset,
+      },
+    });
+    return ticketRowsFromMethodData(data)
+      .sort((a, b) => {
+        const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
+        const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
+        return bt - at;
+      })
+      .slice(0, limit);
+  } catch (e) {
+    console.warn("[supportTickets] mobile_app support lookup failed, falling back to Resource API:", e.message);
+  }
+
   const queries = [];
   addQueries(queries, ["external_id", "user_id", "patient_id"], userId, status);
   addQueries(queries, ["user_id"], userLinkName, status);
@@ -265,7 +336,17 @@ router.post("/", async (req, res) => {
       },
       req.userLinkName,
     );
-    const saved = await erpCreate(DOCTYPE.MOBILE_APP_SUPPORT_TICKET, doc);
+    let saved = null;
+    try {
+      const { data } = await callFirstSupportMethod(SUPPORT_SYNC_METHODS, {
+        method: "POST",
+        body: doc,
+      });
+      saved = Array.isArray(data) ? data[0] : data;
+    } catch (e) {
+      console.warn("[supportTickets] mobile_app support sync failed, falling back to Resource API:", e.message);
+      saved = await erpCreate(DOCTYPE.MOBILE_APP_SUPPORT_TICKET, doc);
+    }
     const ticket = mapTicket(saved || {});
     if (isPluginPath(req)) return res.status(201).json({ success: true, data: { ticket } });
     return res.status(201).json({ success: true, data: saved });
