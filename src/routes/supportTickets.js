@@ -211,6 +211,32 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
     console.warn("[supportTickets] mobile_app support lookup failed, falling back to Resource API:", e.message);
   }
 
+  try {
+    const parsed = await erpCallMethod("mobile_app.api.v1.users_lookup", {
+      method: "GET",
+      appToken: true,
+      query: {
+        external_id: userId,
+        supabase_user_id: userId,
+        email: userEmail,
+        phone: userPhone,
+      },
+    });
+    const data = unwrapMethodData(parsed);
+    const rows = ticketRowsFromMethodData(data);
+    if (rows.length > 0) {
+      return rows
+        .sort((a, b) => {
+          const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
+          const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
+          return bt - at;
+        })
+        .slice(offset, offset + limit);
+    }
+  } catch (e) {
+    console.warn("[supportTickets] users_lookup engagement fallback failed:", e.message);
+  }
+
   const queries = [];
   addQueries(queries, ["external_id", "user_id", "patient_id"], userId, status);
   addQueries(queries, ["user_id"], userLinkName, status);
