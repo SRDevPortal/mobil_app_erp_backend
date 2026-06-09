@@ -65,6 +65,7 @@ function createApp() {
   app.use("/api/v1/appointments", appointmentsRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/support-tickets", supportTicketsRouter);
+  app.use("/api/v1/support/tickets", supportTicketsRouter);
   app.use("/api/v1/webhook-events", webhookEventsRouter);
 
   app.use((err, _req, res, _next) => {

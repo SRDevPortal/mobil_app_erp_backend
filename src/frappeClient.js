@@ -49,13 +49,17 @@ async function erpFetch(path, { method = "GET", body, query } = {}) {
   return parsed;
 }
 
-async function erpGetList(doctype, { filters = [], fields = ["name"], limit = 20, orderBy = "modified desc" } = {}) {
+async function erpGetList(
+  doctype,
+  { filters = [], fields = ["name"], limit = 20, offset = 0, orderBy = "modified desc" } = {},
+) {
   const payload = await erpFetch(`/api/resource/${encodeURIComponent(doctype)}`, {
     query: {
       filters,
       fields,
       order_by: orderBy,
       limit_page_length: limit,
+      limit_start: offset,
     },
   });
   return Array.isArray(payload?.data) ? payload.data : [];
