@@ -1,4 +1,4 @@
-const { ERP_BASE_URL, ERP_TOKEN, erpAuthHeader } = require("./config");
+const { ERP_BASE_URL, ERP_TOKEN, MOBILE_APP_ERP_TOKEN, erpAuthHeader } = require("./config");
 
 async function erpFetch(path, { method = "GET", body, query } = {}) {
   if (!ERP_BASE_URL) throw Object.assign(new Error("ERP_BASE_URL is not configured"), { status: 503 });
@@ -82,15 +82,61 @@ async function erpGetDoc(doctype, name) {
   return payload?.data || null;
 }
 
-/**
- * Call `mobile_app.api.*` methods, e.g. `mobile_app.api.v1.users_full_sync`.
- * Same **ERP_TOKEN** auth as Resource API (`Authorization: token client_id:client_secret`).
- */
-async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, body } = {}) {
+async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, body, appToken = false } = {}) {
   const clean = String(methodDottedPath || "").trim().replace(/^\/+/, "");
   if (!clean) throw Object.assign(new Error("erpCallMethod: missing method path"), { status: 400 });
-  const path = `/api/method/${clean}`;
-  return erpFetch(path, { method, query, body });
+  if (!ERP_BASE_URL) throw Object.assign(new Error("ERP_BASE_URL is not configured"), { status: 503 });
+  if (appToken && !MOBILE_APP_ERP_TOKEN) {
+    throw Object.assign(new Error("MOBILE_APP_ERP_TOKEN is not configured"), { status: 503 });
+  }
+  if (!appToken && !ERP_TOKEN) {
+    throw Object.assign(new Error("ERP_TOKEN is not configured"), { status: 503 });
+  }
+
+  const url = new URL(`${ERP_BASE_URL}/api/method/${clean}`);
+  if (query && typeof query === "object") {
+    for (const [k, v] of Object.entries(query)) {
+      if (v !== undefined && v !== null && v !== "") {
+        url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+      }
+    }
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(appToken ? { "X-ERP-Token": MOBILE_APP_ERP_TOKEN } : erpAuthHeader()),
+  };
+
+  const response = await fetch(url.toString(), {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await response.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch (_) {
+    parsed = { message: text };
+  }
+
+  if (!response.ok) {
+    let msg = parsed?.message || parsed?.exc || parsed?._error_message;
+    if (!msg || String(msg).trim() === "") {
+      msg = `ERP HTTP ${response.status} ${method} /api/method/${clean}`;
+      if (response.status === 404) {
+        msg += ". Unknown method on Frappe. Check ERP_BASE_URL and that the method exists.";
+      }
+    }
+    const err = new Error(msg);
+    err.status = response.status;
+    err.payload = parsed;
+    err.frappePath = `/api/method/${clean}`;
+    throw err;
+  }
+
+  return parsed;
 }
 
 module.exports = {

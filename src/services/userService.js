@@ -186,6 +186,7 @@ async function tryUsersLookupV1(merged = {}) {
     const parsed = await erpCallMethod("mobile_app.api.v1.users_lookup", {
       method: "GET",
       query: q,
+      appToken: true,
     });
     const data = unwrapMobileAppV1Message(parsed);
     if (!data || typeof data !== "object") return null;
@@ -201,6 +202,7 @@ async function syncMobileAppUserViaV1(body = {}) {
     const parsed = await erpCallMethod("mobile_app.api.v1.users_sync", {
       method: "POST",
       body,
+      appToken: true,
     });
     const data = unwrapMobileAppV1Message(parsed);
     if (!data || typeof data !== "object") return null;
