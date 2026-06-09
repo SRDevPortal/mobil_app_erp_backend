@@ -4,6 +4,10 @@ const {
   PORT,
   ERP_BASE_URL,
   ERP_TOKEN,
+  ERP_API_KEY,
+  ERP_API_SECRET,
+  ERP_BEARER_TOKEN,
+  ERP_AUTH_SCHEME,
   DOCTYPE,
   APP_ERP_TOKEN,
   MOBILE_APP_ERP_TOKEN,
@@ -41,6 +45,10 @@ function createApp() {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
         /** Node → Frappe (`Authorization: token client_id:client_secret`) */
         erpTokenConfigured: Boolean(ERP_TOKEN),
+        erpAuthScheme: ERP_AUTH_SCHEME,
+        erpTokenHasColon: ERP_TOKEN.includes(":"),
+        erpApiKeyPairConfigured: Boolean(ERP_API_KEY && ERP_API_SECRET),
+        erpBearerTokenConfigured: Boolean(ERP_BEARER_TOKEN),
         /** Node → Frappe for `mobile_app.api.v1.*` (`X-ERP-Token` = site `mobile_app_erp_token`) */
         mobileAppErpTokenConfigured: Boolean(MOBILE_APP_ERP_TOKEN),
         /** App / Postman → Node (`X-ERP-Token` = APP_ERP_TOKEN) */

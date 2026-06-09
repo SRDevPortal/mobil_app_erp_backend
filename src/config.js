@@ -9,7 +9,20 @@ function normalizeSecret(v) {
 
 const ERP_BASE_URL = trim(process.env.ERP_BASE_URL || "").replace(/\/+$/, "");
 /** Frappe API key: `api_key:api_secret` — sent as `Authorization: token …` unless ERP_AUTH_SCHEME=bearer */
-const ERP_TOKEN = normalizeSecret(process.env.ERP_TOKEN || "");
+const ERP_API_KEY = normalizeSecret(process.env.ERP_API_KEY || "");
+const ERP_API_SECRET = normalizeSecret(process.env.ERP_API_SECRET || "");
+const ERP_BEARER_TOKEN = normalizeSecret(process.env.ERP_BEARER_TOKEN || "");
+
+function normalizeErpToken(v) {
+  return normalizeSecret(v)
+    .replace(/^token\s+/i, "")
+    .replace(/^bearer\s+/i, "")
+    .trim();
+}
+
+const ERP_TOKEN = normalizeErpToken(
+  ERP_API_KEY && ERP_API_SECRET ? `${ERP_API_KEY}:${ERP_API_SECRET}` : process.env.ERP_TOKEN || ERP_BEARER_TOKEN,
+);
 const ERP_AUTH_SCHEME = trim(process.env.ERP_AUTH_SCHEME || "token").toLowerCase();
 /** App / Postman → this Node API (`requireAppToken` on `/api/v1/*`). */
 const APP_ERP_TOKEN = normalizeSecret(process.env.APP_ERP_TOKEN || "");
@@ -64,6 +77,9 @@ function erpAuthHeader() {
 module.exports = {
   ERP_BASE_URL,
   ERP_TOKEN,
+  ERP_API_KEY,
+  ERP_API_SECRET,
+  ERP_BEARER_TOKEN,
   ERP_AUTH_SCHEME,
   APP_ERP_TOKEN,
   MOBILE_APP_ERP_TOKEN,
