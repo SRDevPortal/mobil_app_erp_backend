@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
-const { DOCTYPE } = require("../config");
+const { DOCTYPE, ERP_API_KEY, ERP_API_SECRET, ERP_TOKEN } = require("../config");
 const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, pickExternalId } = require("../normalize");
@@ -368,7 +368,14 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (e) {
-    return res.status(e.status || 500).json({ success: false, message: e.message });
+    const authDebug = /AuthenticationError|validate_api_key_secret/i.test(String(e.message || ""))
+      ? {
+          erpTokenHasColon: ERP_TOKEN.includes(":"),
+          erpTokenLength: ERP_TOKEN.length,
+          erpApiKeyPairConfigured: Boolean(ERP_API_KEY && ERP_API_SECRET),
+        }
+      : undefined;
+    return res.status(e.status || 500).json({ success: false, message: e.message, ...(authDebug ? { authDebug } : {}) });
   }
 });
 

@@ -17,6 +17,8 @@ function normalizeErpToken(v) {
   return normalizeSecret(v)
     .replace(/^token\s+/i, "")
     .replace(/^bearer\s+/i, "")
+    .replace(/^['"]|['"]$/g, "")
+    .replace(/\s*:\s*/g, ":")
     .trim();
 }
 

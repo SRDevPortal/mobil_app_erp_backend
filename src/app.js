@@ -47,6 +47,7 @@ function createApp() {
         erpTokenConfigured: Boolean(ERP_TOKEN),
         erpAuthScheme: ERP_AUTH_SCHEME,
         erpTokenHasColon: ERP_TOKEN.includes(":"),
+        erpTokenLength: ERP_TOKEN.length,
         erpApiKeyPairConfigured: Boolean(ERP_API_KEY && ERP_API_SECRET),
         erpBearerTokenConfigured: Boolean(ERP_BEARER_TOKEN),
         /** Node → Frappe for `mobile_app.api.v1.*` (`X-ERP-Token` = site `mobile_app_erp_token`) */
