@@ -21,6 +21,14 @@ const upload = multer({
 router.post("/sync", async (req, res) => {
   try {
     const body = req.body || {};
+    const existing = await getMobileAppUserForApi(body, {}, {});
+    if (existing) {
+      return res.json({
+        success: true,
+        data: attachCustomerIdentity(existing, existing.external_id ?? pickExternalId(body)),
+      });
+    }
+
     const fromV1 = await syncMobileAppUserViaV1(body);
     if (fromV1) {
       const ext = fromV1.external_id ?? pickExternalId(body);
