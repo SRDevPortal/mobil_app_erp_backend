@@ -57,13 +57,30 @@ const MESSAGE_DOCTYPE =
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
 const SUPPORT_LOOKUP_METHODS = [
   "mobile_app.api.v1.support_tickets_lookup",
+  "mobile_app.api.v1.support_tickets_list",
+  "mobile_app.api.v1.support_tickets_get",
+  "mobile_app.api.v1.support_tickets_full_sync",
   "mobile_app.api.v1.support_ticket_lookup",
+  "mobile_app.api.v1.support_ticket_list",
+  "mobile_app.api.v1.support_ticket_get",
   "mobile_app.api.v1.support_tickets",
+  "mobile_app.api.v1.support_ticket",
   "mobile_app.api.v1.tickets_lookup",
+  "mobile_app.api.v1.tickets_list",
+  "mobile_app.api.v1.user_tickets",
+  "mobile_app.api.v1.get_user_tickets",
+  "mobile_app.api.v1.get_support_tickets",
+  "mobile_app.api.v1.support.lookup",
+  "mobile_app.api.v1.support.list_tickets",
+  "mobile_app.api.v1.support.get_tickets",
 ];
 const SUPPORT_SYNC_METHODS = [
   "mobile_app.api.v1.support_tickets_sync",
+  "mobile_app.api.v1.support_tickets_create",
   "mobile_app.api.v1.support_ticket_sync",
+  "mobile_app.api.v1.support_ticket_create",
+  "mobile_app.api.v1.create_support_ticket",
+  "mobile_app.api.v1.support.create_ticket",
 ];
 
 function toApiStatus(value) {
@@ -134,6 +151,10 @@ function ticketRowsFromMethodData(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.tickets)) return data.tickets;
   if (Array.isArray(data?.support_tickets)) return data.support_tickets;
+  if (Array.isArray(data?.supportTickets)) return data.supportTickets;
+  if (Array.isArray(data?.support_ticket)) return data.support_ticket;
+  if (Array.isArray(data?.supportTicket)) return data.supportTicket;
+  if (Array.isArray(data?.ticket_list)) return data.ticket_list;
   if (Array.isArray(data?.rows)) return data.rows;
   if (Array.isArray(data?.engagement_items)) {
     return data.engagement_items.filter((row) => /support|ticket/i.test(String(row.record_type || row.type || "")));
@@ -191,10 +212,14 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
       method: "GET",
       query: {
         external_id: userId,
+        customer_id: userId,
+        patient_id: userId,
         user_id: userId,
         mobile_user_id: userLinkName,
         email: userEmail,
         phone: userPhone,
+        mobile: userPhone,
+        phone_number: userPhone,
         status,
         limit,
         offset,
@@ -217,9 +242,13 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
       appToken: true,
       query: {
         external_id: userId,
+        customer_id: userId,
         supabase_user_id: userId,
+        user_id: userId,
+        mobile_user_id: userLinkName,
         email: userEmail,
         phone: userPhone,
+        mobile: userPhone,
       },
     });
     const data = unwrapMethodData(parsed);
