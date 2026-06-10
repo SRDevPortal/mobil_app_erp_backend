@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
-const { DOCTYPE, ERP_BASE_URL, erpAuthHeader } = require("../config");
+const { DOCTYPE, ERP_BASE_URL, MOBILE_APP_ERP_TOKEN } = require("../config");
 const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
 const {
   findMobileAppUser,
@@ -108,6 +108,9 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
     if (!ERP_BASE_URL) {
       return res.status(503).json({ success: false, message: "ERP_BASE_URL is not configured" });
     }
+    if (!MOBILE_APP_ERP_TOKEN) {
+      return res.status(503).json({ success: false, message: "MOBILE_APP_ERP_TOKEN is not configured" });
+    }
     if (!req.file || !req.file.buffer?.length) {
       return res.status(400).json({ success: false, message: "Missing file in form-data field 'file'" });
     }
@@ -130,7 +133,7 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
     const endpoint = `${ERP_BASE_URL.replace(/\/+$/, "")}/api/method/mobile_app.api.profile_image.upload_profile_image`;
     const upstream = await fetch(endpoint, {
       method: "POST",
-      headers: { ...erpAuthHeader() },
+      headers: { "X-ERP-Token": MOBILE_APP_ERP_TOKEN },
       body: form,
     });
 
