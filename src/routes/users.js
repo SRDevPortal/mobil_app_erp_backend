@@ -19,6 +19,24 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
 });
 
+async function updateMobileAppUserImageFields(userName, profileImageUrl) {
+  const updated_at = new Date().toISOString();
+  const attempts = [
+    { profile_image_url: profileImageUrl, avatar_url: profileImageUrl, image: profileImageUrl, updated_at },
+    { profile_image_url: profileImageUrl, avatar_url: profileImageUrl, updated_at },
+    { image: profileImageUrl, updated_at },
+  ];
+  let lastError = null;
+  for (const doc of attempts) {
+    try {
+      return await erpUpdate(DOCTYPE.MOBILE_APP_USER, userName, doc);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("Unable to update profile image fields");
+}
+
 router.post("/sync", async (req, res) => {
   try {
     const body = req.body || {};
@@ -124,14 +142,28 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
     let resolvedExternal = external_id || supabase_user_id;
     let persistWarning = null;
     try {
-      const result = await upsertMobileAppUser({
-        external_id: resolvedExternal,
-        supabase_user_id,
+      const imageDoc = {
         profile_image_url,
         avatar_url: profile_image_url,
-      });
-      saved = result.saved;
-      resolvedExternal = result.external_id || resolvedExternal;
+        image: profile_image_url,
+        updated_at: new Date().toISOString(),
+      };
+      const existing = await findMobileAppUser(
+        { external_id: resolvedExternal, supabase_user_id },
+        {},
+        {},
+      );
+      if (existing?.name) {
+        saved = await updateMobileAppUserImageFields(existing.name, profile_image_url);
+      } else {
+        const result = await upsertMobileAppUser({
+          external_id: resolvedExternal,
+          supabase_user_id,
+          ...imageDoc,
+        });
+        saved = result.saved;
+        resolvedExternal = result.external_id || resolvedExternal;
+      }
     } catch (e) {
       persistWarning = e.message || "Profile image uploaded, but ERP user record update failed.";
       console.warn("[users/profile-image] ERP user image URL update failed:", persistWarning);
@@ -143,7 +175,7 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
         ...attachCustomerIdentity(saved || {}, saved?.external_id || resolvedExternal || supabase_user_id),
         profile_image_url: profile_image_url || saved?.profile_image_url || null,
         avatar_url: profile_image_url || saved?.avatar_url || null,
-        image: saved?.image || null,
+        image: profile_image_url || saved?.image || null,
         upload_key: uploaded.key,
         ...(persistWarning ? { warning: persistWarning } : {}),
       },

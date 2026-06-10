@@ -170,6 +170,7 @@ function mapUserToFrappe(body = {}) {
     full_name: full_name || undefined,
     first_name: body.first_name,
     last_name: body.last_name,
+    image: body.image,
     avatar_url: body.avatar_url,
     profile_image_url: body.profile_image_url,
     is_active: body.is_active === false ? 0 : body.is_active === true ? 1 : body.is_active,
