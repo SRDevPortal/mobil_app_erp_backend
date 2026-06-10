@@ -40,6 +40,26 @@ const PORT = Number(process.env.PORT || 3101);
 const SUPABASE_URL = trim(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = normalizeSecret(process.env.SUPABASE_ANON_KEY || "");
 
+const APP_NOTIFICATION_TOKEN = normalizeSecret(process.env.APP_NOTIFICATION_TOKEN || APP_ERP_TOKEN);
+const ONESIGNAL_APP_ID = normalizeSecret(process.env.ONESIGNAL_APP_ID || "");
+const ONESIGNAL_REST_API_KEY = normalizeSecret(process.env.ONESIGNAL_REST_API_KEY || "");
+const FCM_SERVER_KEY = normalizeSecret(process.env.FCM_SERVER_KEY || "");
+const FIREBASE_PROJECT_ID = normalizeSecret(process.env.FIREBASE_PROJECT_ID || "");
+const FIREBASE_CLIENT_EMAIL = normalizeSecret(process.env.FIREBASE_CLIENT_EMAIL || "");
+const FIREBASE_PRIVATE_KEY = normalizeSecret(process.env.FIREBASE_PRIVATE_KEY || "");
+const FIREBASE_SERVICE_ACCOUNT_JSON = normalizeSecret(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "");
+const REMINDER_BEFORE_MINUTES = Number(process.env.REMINDER_BEFORE_MINUTES || 120);
+const REMINDER_LOOKAHEAD_MINUTES = Number(process.env.REMINDER_LOOKAHEAD_MINUTES || 15);
+const APPOINTMENT_TIMEZONE_OFFSET_MINUTES = Number(process.env.APPOINTMENT_TIMEZONE_OFFSET_MINUTES || 330);
+
+const OPENAI_API_KEY = normalizeSecret(process.env.OPENAI_API_KEY || "");
+const OPENAI_MODEL = trim(process.env.OPENAI_MODEL || "gpt-4o-mini");
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 20000);
+const OPENAI_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 900);
+const REPORTS_OCR_TOKEN = normalizeSecret(process.env.REPORTS_OCR_TOKEN || APP_ERP_TOKEN);
+const S3_PRESCRIPTION_PREFIX = trim(process.env.S3_PRESCRIPTION_PREFIX || "prescriptions");
+const S3_PUBLIC_BASE_URL = trim(process.env.S3_PUBLIC_BASE_URL || "");
+
 const DOCTYPE = {
   MOBILE_APP_USER: trim(process.env.DOCTYPE_MOBILE_APP_USER || "Mobile App User"),
   MOBILE_APP_USER_SESSION: trim(process.env.DOCTYPE_MOBILE_APP_USER_SESSION || "Mobile App User Session"),
@@ -88,6 +108,24 @@ module.exports = {
   PORT,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  APP_NOTIFICATION_TOKEN,
+  APPOINTMENT_TIMEZONE_OFFSET_MINUTES,
+  FCM_SERVER_KEY,
+  FIREBASE_CLIENT_EMAIL,
+  FIREBASE_PRIVATE_KEY,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_SERVICE_ACCOUNT_JSON,
+  ONESIGNAL_APP_ID,
+  ONESIGNAL_REST_API_KEY,
+  OPENAI_API_KEY,
+  OPENAI_MAX_OUTPUT_TOKENS,
+  OPENAI_MODEL,
+  OPENAI_TIMEOUT_MS,
+  REMINDER_BEFORE_MINUTES,
+  REMINDER_LOOKAHEAD_MINUTES,
+  REPORTS_OCR_TOKEN,
+  S3_PRESCRIPTION_PREFIX,
+  S3_PUBLIC_BASE_URL,
   DOCTYPE,
   erpAuthHeader,
 };

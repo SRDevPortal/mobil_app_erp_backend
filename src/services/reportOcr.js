@@ -1,0 +1,201 @@
+const {
+  OPENAI_API_KEY,
+  OPENAI_MAX_OUTPUT_TOKENS,
+  OPENAI_MODEL,
+  OPENAI_TIMEOUT_MS,
+} = require("../config");
+
+const REPORT_FIELDS = {
+  lft: [
+    ["total_protein", "Total Protein"],
+    ["albumin", "Albumin"],
+    ["globulin", "Globulin"],
+    ["bilirubin", "Bilirubin"],
+    ["sgot_ast", "SGOT / AST"],
+    ["sgpt_alt", "SGPT / ALT"],
+    ["alp", "ALP"],
+  ],
+  kft: [
+    ["creatinine", "Creatinine"],
+    ["urea", "Urea"],
+    ["uric_acid", "Uric Acid"],
+  ],
+  cbc: [
+    ["hemoglobin", "Hemoglobin"],
+    ["wbc", "WBC"],
+    ["platelets", "Platelets"],
+  ],
+  semen: [
+    ["sperm_count", "Sperm Count"],
+    ["motility", "Motility"],
+    ["morphology", "Morphology"],
+    ["volume", "Volume"],
+  ],
+  hormone: [
+    ["testosterone", "Testosterone"],
+    ["fsh", "FSH"],
+    ["lh", "LH"],
+  ],
+  varicocele_usg: [
+    ["varicocele_grade", "Varicocele Grade"],
+    ["testis_size", "Testis Size"],
+    ["testis_structure", "Testis Structure"],
+    ["hydrocele", "Hydrocele"],
+    ["cyst", "Cyst"],
+  ],
+  varicocele_doppler: [
+    ["varicocele_grade", "Varicocele Grade"],
+    ["vein_dilation", "Vein Dilation"],
+    ["reflux", "Reflux"],
+    ["blood_flow", "Blood Flow"],
+  ],
+};
+
+const extractionSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["fields"],
+  properties: {
+    fields: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["key", "label", "value", "unit", "status", "score", "confidence"],
+        properties: {
+          key: { type: "string" },
+          label: { type: "string" },
+          value: { type: ["string", "number", "null"] },
+          unit: { type: "string" },
+          status: { type: "string", enum: ["NORMAL", "LOW", "HIGH", "BORDERLINE", "ABNORMAL", "CRITICAL", "UNKNOWN"] },
+          score: { type: "integer", minimum: 0, maximum: 100 },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+  },
+};
+
+function normalizeReportType(raw) {
+  const value = (raw || "").toString().trim().toLowerCase();
+  if (["lft", "thyroid", "lft_thyroid", "lab_lft_thyroid"].includes(value)) return "lft";
+  if (["kft", "kidney", "kft_report"].includes(value)) return "kft";
+  if (["cbc", "cbc_report"].includes(value)) return "cbc";
+  if (["semen", "semen_report"].includes(value)) return "semen";
+  if (["hormone", "hormone_report"].includes(value)) return "hormone";
+  if (["varicocele_usg", "usg"].includes(value)) return "varicocele_usg";
+  if (["varicocele_doppler", "doppler"].includes(value)) return "varicocele_doppler";
+  return value || "unknown";
+}
+
+function fileContentPart(fileUrl, fileName) {
+  const lower = `${fileName || fileUrl}`.toLowerCase();
+  if (lower.includes(".pdf") || lower.includes("application/pdf")) {
+    return { type: "input_file", file_url: fileUrl };
+  }
+  return { type: "input_image", image_url: fileUrl };
+}
+
+function buildPrompt(reportType, expectedFields) {
+  const fieldList = expectedFields.map(([key, label]) => `${key}: ${label}`).join("\n");
+  return [
+    "Extract only the requested lab values visible in the attached report.",
+    "Do not invent missing values. Return no row for a missing value.",
+    "Use exact requested keys. Keep value numeric/text only; put unit separately.",
+    "Status must be NORMAL, LOW, HIGH, BORDERLINE, ABNORMAL, CRITICAL, or UNKNOWN.",
+    "Score is 0-100 where 100 is best/normal.",
+    `Report type: ${reportType}`,
+    `Fields:\n${fieldList || "Infer relevant report fields."}`,
+  ].join("\n\n");
+}
+
+function normalizeStatus(raw) {
+  const value = (raw || "").toString().trim().toUpperCase();
+  if (!value) return "UNKNOWN";
+  if (["NORMAL", "OK", "GOOD"].includes(value)) return "NORMAL";
+  if (["BORDERLINE", "LOW", "HIGH", "ABNORMAL", "CRITICAL"].includes(value)) return value;
+  return value;
+}
+
+function normalizeExtractionResult(raw, reportType, expectedFields) {
+  const expectedByKey = new Map(expectedFields.map(([key, label]) => [key, label]));
+  const fields = [];
+  for (const row of Array.isArray(raw?.fields) ? raw.fields : []) {
+    const key = (row.key || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key || row.value == null || row.value.toString().trim() === "") continue;
+    fields.push({
+      key,
+      label: (expectedByKey.get(key) || row.label || key).toString(),
+      value: row.value,
+      unit: row.unit == null ? "" : String(row.unit),
+      status: normalizeStatus(row.status),
+      score: Number.isFinite(Number(row.score)) ? Math.max(0, Math.min(100, Math.round(Number(row.score)))) : 70,
+      confidence: Number.isFinite(Number(row.confidence)) ? Math.max(0, Math.min(1, Number(row.confidence))) : 0.6,
+    });
+  }
+  return {
+    success: true,
+    report_type: reportType,
+    fields,
+    lft_score: raw?.lft_score ?? null,
+    cbc_score: raw?.cbc_score ?? null,
+    status: raw?.status ?? null,
+    issues: Array.isArray(raw?.issues) ? raw.issues.map(String) : [],
+    parameters: Array.isArray(raw?.parameters) ? raw.parameters : [],
+    raw_text_summary: raw?.raw_text_summary ?? null,
+  };
+}
+
+async function extractReportWithOpenAI({ reportType, fileUrl, fileName }) {
+  if (!OPENAI_API_KEY) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { statusCode: 503 });
+  const expectedFields = REPORT_FIELDS[reportType] || [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS,
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_text", text: buildPrompt(reportType, expectedFields) },
+            fileContentPart(fileUrl, fileName),
+          ],
+        }],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "report_ocr_fields",
+            strict: true,
+            schema: extractionSchema,
+          },
+        },
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(payload?.error?.message || `OpenAI request failed: ${response.status}`), {
+        statusCode: response.status,
+      });
+    }
+    const outputText = payload.output_text || "";
+    if (!outputText.trim()) throw new Error("OpenAI returned an empty extraction response");
+    return normalizeExtractionResult(JSON.parse(outputText), reportType, expectedFields);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw Object.assign(new Error("OpenAI extraction timed out"), { statusCode: 504 });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+module.exports = { extractReportWithOpenAI, normalizeReportType };

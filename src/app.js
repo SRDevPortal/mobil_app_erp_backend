@@ -24,8 +24,11 @@ const healthEntriesRouter = require("./routes/healthEntries");
 const prescriptionsRouter = require("./routes/prescriptions");
 const doctorsRouter = require("./routes/doctors");
 const appointmentsRouter = require("./routes/appointments");
+const appointmentNotificationsRouter = require("./routes/appointmentNotifications");
 const notificationsRouter = require("./routes/notifications");
 const supportTicketsRouter = require("./routes/supportTickets");
+const reportsRouter = require("./routes/reports");
+const uploadsRouter = require("./routes/uploads");
 const webhookEventsRouter = require("./routes/webhookEvents");
 const authRouter = require("./routes/auth");
 
@@ -54,6 +57,7 @@ function createApp() {
         mobileAppErpTokenConfigured: Boolean(MOBILE_APP_ERP_TOKEN),
         /** App / Postman → Node (`X-ERP-Token` = APP_ERP_TOKEN) */
         appTokenConfigured: Boolean(APP_ERP_TOKEN),
+        consolidatedBackend: true,
         doctypes: DOCTYPE,
       },
       supabase: {
@@ -72,9 +76,12 @@ function createApp() {
   app.use("/api/v1/prescriptions", prescriptionsRouter);
   app.use("/api/v1/doctors", doctorsRouter);
   app.use("/api/v1/appointments", appointmentsRouter);
+  app.use("/api/v1", appointmentNotificationsRouter);
   app.use("/api/v1/notifications", notificationsRouter);
+  app.use("/api/v1/reports", reportsRouter);
   app.use("/api/v1/support-tickets", supportTicketsRouter);
   app.use("/api/v1/support/tickets", supportTicketsRouter);
+  app.use("/api/upload", requireAppToken, uploadsRouter);
   app.use("/api/v1/webhook-events", webhookEventsRouter);
 
   app.use((err, _req, res, _next) => {
