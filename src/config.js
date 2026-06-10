@@ -58,6 +58,7 @@ const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 20000);
 const OPENAI_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 900);
 const REPORTS_OCR_TOKEN = normalizeSecret(process.env.REPORTS_OCR_TOKEN || APP_ERP_TOKEN);
 const S3_PRESCRIPTION_PREFIX = trim(process.env.S3_PRESCRIPTION_PREFIX || "prescriptions");
+const S3_PROFILE_PREFIX = trim(process.env.S3_PROFILE_PREFIX || "profile-pics");
 const S3_PUBLIC_BASE_URL = trim(process.env.S3_PUBLIC_BASE_URL || "");
 
 const DOCTYPE = {
@@ -125,6 +126,7 @@ module.exports = {
   REMINDER_LOOKAHEAD_MINUTES,
   REPORTS_OCR_TOKEN,
   S3_PRESCRIPTION_PREFIX,
+  S3_PROFILE_PREFIX,
   S3_PUBLIC_BASE_URL,
   DOCTYPE,
   erpAuthHeader,

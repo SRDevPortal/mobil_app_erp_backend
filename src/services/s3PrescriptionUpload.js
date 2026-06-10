@@ -1,5 +1,5 @@
 const path = require("path");
-const { S3_PRESCRIPTION_PREFIX, S3_PUBLIC_BASE_URL } = require("../config");
+const { S3_PRESCRIPTION_PREFIX, S3_PROFILE_PREFIX, S3_PUBLIC_BASE_URL } = require("../config");
 
 let s3Client = null;
 
@@ -49,7 +49,7 @@ function resolveMimeType(fileMimetype, extFromName) {
   return "image/jpeg";
 }
 
-async function uploadPrescriptionToS3({ file, userId }) {
+async function uploadFileToS3({ file, userId, prefix = S3_PRESCRIPTION_PREFIX, defaultBaseName = "upload" }) {
   const rawUserId = (userId || "").toString().trim();
   if (!rawUserId) throw new Error("Missing userId.");
   if (!file || !file.buffer) throw new Error('No file uploaded. Use field name "file".');
@@ -60,10 +60,11 @@ async function uploadPrescriptionToS3({ file, userId }) {
   const extFromName = (path.extname(file.originalname || "") || "").toLowerCase();
   const isPdf = (file.mimetype || "").toLowerCase() === "application/pdf" || extFromName === ".pdf";
   const mime = resolveMimeType(file.mimetype, extFromName);
-  const originalBaseName = path.basename(file.originalname || `prescription-${Date.now()}`, extFromName);
+  const originalBaseName = path.basename(file.originalname || `${defaultBaseName}-${Date.now()}`, extFromName);
   const safeBaseName = originalBaseName.replace(/[^a-zA-Z0-9._-]/g, "_");
   const ext = isPdf ? ".pdf" : extFromName || ".jpg";
-  const key = `${S3_PRESCRIPTION_PREFIX}/${safeUserId}/${Date.now()}_${safeBaseName}${ext}`;
+  const safePrefix = (prefix || S3_PRESCRIPTION_PREFIX).toString().trim().replace(/^\/+|\/+$/g, "");
+  const key = `${safePrefix}/${safeUserId}/${Date.now()}_${safeBaseName}${ext}`;
 
   await client.send(new PutObjectCommand({
     Bucket: process.env.S3_BUCKET,
@@ -81,4 +82,12 @@ async function uploadPrescriptionToS3({ file, userId }) {
   return { key, url };
 }
 
-module.exports = { uploadPrescriptionToS3 };
+async function uploadPrescriptionToS3({ file, userId }) {
+  return uploadFileToS3({ file, userId, prefix: S3_PRESCRIPTION_PREFIX, defaultBaseName: "prescription" });
+}
+
+async function uploadProfileImageToS3({ file, userId }) {
+  return uploadFileToS3({ file, userId, prefix: S3_PROFILE_PREFIX, defaultBaseName: "profile-image" });
+}
+
+module.exports = { uploadFileToS3, uploadPrescriptionToS3, uploadProfileImageToS3 };
