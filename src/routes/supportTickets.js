@@ -15,7 +15,20 @@ router.use((req, _res, next) => {
   next();
 });
 
-router.use(resolveUserMiddleware);
+function supportRouteNeedsUser(req) {
+  if (req.path === "/" && (req.method === "GET" || req.method === "POST")) return true;
+  if (req.method === "POST" && /\/messages$/.test(req.path || "")) {
+    return Boolean(req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
+  }
+  return false;
+}
+
+function optionalSupportUserMiddleware(req, res, next) {
+  if (supportRouteNeedsUser(req)) return resolveUserMiddleware(req, res, next);
+  return next();
+}
+
+router.use(optionalSupportUserMiddleware);
 
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
 const SUPPORT_RESOURCE_DOCTYPES = [
