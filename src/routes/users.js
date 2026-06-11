@@ -11,7 +11,7 @@ const {
   syncMobileAppUserViaV1,
 } = require("../services/userService");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
-const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity } = require("../normalize");
+const { pickSessionExternalId, mapSessionToFrappe, pickExternalId, attachCustomerIdentity, nowFrappeDatetime } = require("../normalize");
 
 const router = express.Router();
 const upload = multer({
@@ -20,7 +20,7 @@ const upload = multer({
 });
 
 async function updateMobileAppUserImageFields(userName, profileImageUrl) {
-  const updated_at = new Date().toISOString();
+  const updated_at = nowFrappeDatetime();
   const attempts = [
     { profile_image_url: profileImageUrl, avatar_url: profileImageUrl, image: profileImageUrl, updated_at },
     { profile_image_url: profileImageUrl, avatar_url: profileImageUrl, updated_at },
@@ -156,7 +156,7 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
         profile_image_url,
         avatar_url: profile_image_url,
         image: profile_image_url,
-        updated_at: new Date().toISOString(),
+        updated_at: nowFrappeDatetime(),
       };
       const existing = await findMobileAppUser(
         { external_id: resolvedExternal, supabase_user_id },
