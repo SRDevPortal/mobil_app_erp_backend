@@ -56,7 +56,7 @@ const SUPPORT_RESOURCE_DOCTYPES = [
 ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const RESOURCE_FIELD_CACHE = new Map();
 const RESOURCE_META_CACHE = new Map();
-const MESSAGE_RESOURCE_CACHE = { value: null };
+const MESSAGE_RESOURCE_CACHE = { value: null, schemaChecked: false };
 const SUPPORT_BASE_FIELDS = [
   "name",
   "ticket_number",
@@ -97,6 +97,7 @@ const MESSAGE_BASE_FIELDS = [
   "name",
   MESSAGE_TICKET_FIELD,
   ...MESSAGE_TICKET_FIELD_CANDIDATES,
+  "ticket_number",
   "ticket",
   "ticket_id",
   "sender_type",
@@ -325,6 +326,78 @@ async function getMessageFieldSet() {
   return resource?.fieldSet || null;
 }
 
+function clearResourceCaches(doctype) {
+  RESOURCE_FIELD_CACHE.delete(doctype);
+  RESOURCE_META_CACHE.delete(doctype);
+  if (doctype === MESSAGE_DOCTYPE) {
+    MESSAGE_RESOURCE_CACHE.value = null;
+  }
+}
+
+function ensureMessageDocTypeShape(meta) {
+  const fields = Array.isArray(meta?.fields) ? meta.fields.map((field) => ({ ...field })) : [];
+  let changed = false;
+
+  let ticketField = fields.find((field) => field?.fieldname === MESSAGE_TICKET_FIELD);
+  if (!ticketField) {
+    const insertAfter = fields.length > 0 ? fields[fields.length - 1].fieldname : undefined;
+    ticketField = {
+      doctype: "DocField",
+      parent: MESSAGE_DOCTYPE,
+      parenttype: "DocType",
+      parentfield: "fields",
+      fieldname: MESSAGE_TICKET_FIELD,
+      label: "Ticket",
+      fieldtype: "Link",
+      options: "App Support Ticket",
+      reqd: 1,
+      ...(insertAfter ? { insert_after: insertAfter } : {}),
+    };
+    fields.push(ticketField);
+    changed = true;
+  }
+
+  if (ticketField.fieldtype !== "Link" || ticketField.options !== "App Support Ticket") {
+    ticketField.fieldtype = "Link";
+    ticketField.options = "App Support Ticket";
+    changed = true;
+  }
+
+  if (!fields.some((field) => field?.fieldname === "ticket_number")) {
+    fields.push({
+      doctype: "DocField",
+      parent: MESSAGE_DOCTYPE,
+      parenttype: "DocType",
+      parentfield: "fields",
+      fieldname: "ticket_number",
+      label: "Ticket Number",
+      fieldtype: "Data",
+      insert_after: MESSAGE_TICKET_FIELD,
+    });
+    changed = true;
+  }
+
+  return { changed, fields };
+}
+
+async function ensureSupportMessageSchema() {
+  if (MESSAGE_RESOURCE_CACHE.schemaChecked) return;
+  MESSAGE_RESOURCE_CACHE.schemaChecked = true;
+
+  try {
+    const meta = await erpGetDoc("DocType", MESSAGE_DOCTYPE);
+    if (!meta) return;
+    const { changed, fields } = ensureMessageDocTypeShape(meta);
+    if (!changed) return;
+
+    await erpUpdate("DocType", MESSAGE_DOCTYPE, { fields });
+    clearResourceCaches(MESSAGE_DOCTYPE);
+    console.log(`[supportTickets] Updated ${MESSAGE_DOCTYPE}.${MESSAGE_TICKET_FIELD} to Link App Support Ticket and ensured ticket_number`);
+  } catch (e) {
+    console.warn(`[supportTickets] Could not auto-sync ${MESSAGE_DOCTYPE} schema:`, e.message);
+  }
+}
+
 function messageFieldFromMeta(meta, ticketDoctype) {
   const fields = meta?.fields || [];
   const compatible = (field) => {
@@ -358,6 +431,7 @@ function messageFieldFromMeta(meta, ticketDoctype) {
 }
 
 async function getMessageResource(ticketDoctype = "App Support Ticket") {
+  await ensureSupportMessageSchema();
   const cached = MESSAGE_RESOURCE_CACHE.value;
   if (cached) return cached;
   for (const doctype of MESSAGE_DOCTYPE_CANDIDATES) {
@@ -798,8 +872,6 @@ async function createMessageViaResource(ticketDoc, body) {
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
   const ticketRefs = [
     ticketDoc.name,
-    ticketDoc.ticket_number,
-    ticketDoc.id,
   ].map((v) => (v || "").toString().trim()).filter(Boolean);
   let lastError = null;
   for (const ticketRef of [...new Set(ticketRefs)]) {
@@ -811,6 +883,7 @@ async function createMessageViaResource(ticketDoc, body) {
         ticket_id: ticketRef,
         support_ticket: ticketRef,
         app_support_ticket: ticketRef,
+        ticket_number: ticketDoc.ticket_number || "",
         sender_type: "User",
         sender_id: body.user_id,
         sender_name: body.user_name || "User",
