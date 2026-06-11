@@ -315,6 +315,47 @@ async function nextTicketNumber(doctype) {
   }
 }
 
+async function findResourceTicketsForQueries(doctype, queries, { limit, offset }) {
+  const fieldSet = await getResourceFieldSet(doctype);
+  const byName = new Map();
+  for (const filters of queries) {
+    const supportedFilters = fieldSet ? filters.filter(([field]) => fieldSet.has(field)) : filters;
+    if (supportedFilters.length !== filters.length) continue;
+    try {
+      const nameRows = await erpGetList(doctype, {
+        fields: ["name"],
+        filters: supportedFilters,
+        limit,
+        offset,
+        orderBy: "modified desc",
+      });
+      for (const row of nameRows) {
+        if (!row?.name) continue;
+        const key = `${doctype}:${row.name}`;
+        if (byName.has(key)) continue;
+        try {
+          const doc = await erpGetDoc(doctype, row.name);
+          byName.set(key, doc || row);
+        } catch (_) {
+          byName.set(key, row);
+        }
+      }
+    } catch (e) {
+      if (e.status !== 403 && e.status !== 404) {
+        console.warn(`[supportTickets] Resource API lookup failed for ${doctype}:`, e.message);
+      }
+    }
+  }
+
+  return [...byName.values()]
+    .sort((a, b) => {
+      const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
+      const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
+      return bt - at;
+    })
+    .slice(0, limit);
+}
+
 async function findTickets({ userId, userLinkName, userEmail, userPhone, userName, status, limit, offset }) {
   try {
     const parsed = await erpCallMethod("mobile_app.api.v1.users_lookup", {
@@ -346,54 +387,23 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
     console.warn("[supportTickets] users_lookup engagement fallback failed:", e.message);
   }
 
-  const queries = [];
-  addQueries(queries, ["external_id", "user_id", "patient_id", "mobile_user_id", "customer_id", "supabase_user_id"], userId, status);
-  addQueries(queries, ["user_id", "mobile_user_id", "patient_id", "customer_id"], userLinkName, status);
-  addQueries(queries, ["email", "user_email", "email_id", "raised_by", "customer_email"], userEmail, status);
-  addQueries(queries, ["phone", "user_phone", "mobile_number", "phone_number", "mobile"], userPhone, status);
-  addQueries(queries, ["customer_name", "requester_name", "user_name", "patient_name", "name_text"], userName, status);
+  const strongQueries = [];
+  addQueries(strongQueries, ["external_id", "user_id", "patient_id", "mobile_user_id", "customer_id", "supabase_user_id"], userId, status);
+  addQueries(strongQueries, ["user_id", "mobile_user_id", "patient_id", "customer_id"], userLinkName, status);
+  addQueries(strongQueries, ["email", "user_email", "email_id", "raised_by", "customer_email"], userEmail, status);
+  addQueries(strongQueries, ["phone", "user_phone", "mobile_number", "phone_number", "mobile"], userPhone, status);
 
-  const byName = new Map();
   for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
-    const fieldSet = await getResourceFieldSet(doctype);
-    for (const filters of queries) {
-      const supportedFilters = fieldSet ? filters.filter(([field]) => fieldSet.has(field)) : filters;
-      if (supportedFilters.length !== filters.length) continue;
-      try {
-        const nameRows = await erpGetList(doctype, {
-          fields: ["name"],
-          filters: supportedFilters,
-          limit,
-          offset,
-          orderBy: "modified desc",
-        });
-        for (const row of nameRows) {
-          if (!row?.name) continue;
-          const key = `${doctype}:${row.name}`;
-          if (byName.has(key)) continue;
-          try {
-            const doc = await erpGetDoc(doctype, row.name);
-            byName.set(key, doc || row);
-          } catch (_) {
-            byName.set(key, row);
-          }
-        }
-      } catch (e) {
-        if (e.status !== 403 && e.status !== 404) {
-          console.warn(`[supportTickets] Resource API lookup failed for ${doctype}:`, e.message);
-        }
-      }
-    }
+    const rows = await findResourceTicketsForQueries(doctype, strongQueries, { limit, offset });
+    if (rows.length > 0) return rows;
   }
 
-  const resourceRows = [...byName.values()]
-    .sort((a, b) => {
-      const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
-      const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
-      return bt - at;
-    })
-    .slice(0, limit);
-  if (resourceRows.length > 0) return resourceRows;
+  const nameQueries = [];
+  addQueries(nameQueries, ["customer_name", "requester_name", "user_name", "patient_name", "name_text"], userName, status);
+  for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
+    const rows = await findResourceTicketsForQueries(doctype, nameQueries, { limit, offset });
+    if (rows.length > 0) return rows;
+  }
 
   return [];
 }
