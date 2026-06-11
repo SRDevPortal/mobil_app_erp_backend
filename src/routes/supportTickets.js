@@ -572,6 +572,7 @@ router.get("/", async (req, res) => {
     const tickets = await Promise.all(rows.map(async (row) => {
       const ticket = mapTicket({ ...row, external_id: row.external_id || userId });
       ticket.unread_message_count = await countUnreadAgentMessages(ticket);
+      ticket.has_pending_agent_reply = ticket.unread_message_count > 0;
       return ticket;
     }));
     return res.json({
