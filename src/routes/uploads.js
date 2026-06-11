@@ -9,6 +9,18 @@ const { uploadPrescriptionToS3 } = require("../services/s3PrescriptionUpload");
 
 const router = express.Router();
 
+function friendlyErpWarning(message) {
+  const raw = (message || "").toString().trim();
+  if (!raw) return "Prescription uploaded, but ERP save failed.";
+  if (raw.includes("Source cannot be") || raw.includes("ValidationError")) {
+    return "Prescription uploaded, but ERP rejected the health entry source.";
+  }
+  if (raw.includes("Traceback") || raw.length > 220) {
+    return "Prescription uploaded, but ERP save failed.";
+  }
+  return raw;
+}
+
 const prescriptionUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -80,7 +92,7 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
         entry_id: `local_${Date.now()}_prescriptions_data`,
         entry_timestamp: nowIso,
         data_json: [entry],
-        source: "App",
+        source: "app",
       };
       const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
       try {
@@ -102,7 +114,7 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
         });
       }
     } catch (e) {
-      erpWarning = e.message || "Prescription uploaded to S3, but ERP save failed.";
+      erpWarning = friendlyErpWarning(e.message || "Prescription uploaded to S3, but ERP save failed.");
       console.warn("[uploads/prescription] ERP prescription health-entry sync failed:", erpWarning);
     }
     return res.status(201).json({
