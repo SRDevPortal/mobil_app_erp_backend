@@ -32,6 +32,22 @@ router.use(optionalSupportUserMiddleware);
 
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
 const MESSAGE_DOCTYPE = (process.env.ERP_MESSAGE_DOCTYPE || "Support Ticket Message").trim();
+const MESSAGE_DOCTYPE_CANDIDATES = [
+  MESSAGE_DOCTYPE,
+  "App Support Ticket Message",
+  "Support Ticket Message",
+  "Support Message",
+  "App Support Message",
+  "Ticket Message",
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
+const MESSAGE_TICKET_FIELD_CANDIDATES = [
+  MESSAGE_TICKET_FIELD,
+  "ticket",
+  "support_ticket",
+  "app_support_ticket",
+  "ticket_id",
+  "parent_ticket",
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const SUPPORT_RESOURCE_DOCTYPES = [
   "App Support Ticket",
   process.env.ERP_TICKET_DOCTYPE,
@@ -40,6 +56,7 @@ const SUPPORT_RESOURCE_DOCTYPES = [
 ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const RESOURCE_FIELD_CACHE = new Map();
 const RESOURCE_META_CACHE = new Map();
+const MESSAGE_RESOURCE_CACHE = { value: null };
 const SUPPORT_BASE_FIELDS = [
   "name",
   "ticket_number",
@@ -79,6 +96,7 @@ const SUPPORT_BASE_FIELDS = [
 const MESSAGE_BASE_FIELDS = [
   "name",
   MESSAGE_TICKET_FIELD,
+  ...MESSAGE_TICKET_FIELD_CANDIDATES,
   "ticket",
   "ticket_id",
   "sender_type",
@@ -303,7 +321,43 @@ function mapMessage(doc = {}) {
 }
 
 async function getMessageFieldSet() {
-  return getResourceFieldSet(MESSAGE_DOCTYPE);
+  const resource = await getMessageResource();
+  return resource?.fieldSet || null;
+}
+
+function messageFieldFromMeta(meta, ticketDoctype) {
+  const fields = meta?.fields || [];
+  for (const candidate of MESSAGE_TICKET_FIELD_CANDIDATES) {
+    const exact = fields.find((field) => field?.fieldname === candidate);
+    if (exact) return exact.fieldname;
+  }
+  const byOptions = fields.find((field) => {
+    const fieldtype = (field?.fieldtype || "").toString().toLowerCase();
+    const options = (field?.options || "").toString().trim();
+    return field?.fieldname && ["link", "dynamic link", "data"].includes(fieldtype) && options === ticketDoctype;
+  });
+  if (byOptions) return byOptions.fieldname;
+  const byName = fields.find((field) => {
+    const haystack = `${field?.fieldname || ""} ${field?.label || ""} ${field?.options || ""}`.toLowerCase();
+    return field?.fieldname && /ticket/.test(haystack);
+  });
+  return byName?.fieldname || null;
+}
+
+async function getMessageResource(ticketDoctype = "App Support Ticket") {
+  const cached = MESSAGE_RESOURCE_CACHE.value;
+  if (cached) return cached;
+  for (const doctype of MESSAGE_DOCTYPE_CANDIDATES) {
+    const meta = await getResourceMeta(doctype);
+    if (!meta) continue;
+    const fieldSet = fieldsFromMeta(meta);
+    const ticketField = messageFieldFromMeta(meta, ticketDoctype) || MESSAGE_TICKET_FIELD;
+    const resource = { doctype, meta, fieldSet, ticketField };
+    MESSAGE_RESOURCE_CACHE.value = resource;
+    console.log(`[supportTickets] Using message DocType ${doctype} with ticket field ${ticketField}`);
+    return resource;
+  }
+  return null;
 }
 
 function addQueries(queries, fields, value, status) {
@@ -535,12 +589,15 @@ async function resolveTicket(id) {
 }
 
 async function getMessages(ticketName, { limit = 100, offset = 0 } = {}) {
-  const fieldSet = await getMessageFieldSet();
-  if (fieldSet && !fieldSet.has(MESSAGE_TICKET_FIELD)) return [];
+  const resource = await getMessageResource();
+  const fieldSet = resource?.fieldSet || null;
+  const ticketField = resource?.ticketField || MESSAGE_TICKET_FIELD;
+  const doctype = resource?.doctype || MESSAGE_DOCTYPE;
+  if (!resource || (fieldSet && !fieldSet.has(ticketField))) return [];
   try {
-    return await erpGetList(MESSAGE_DOCTYPE, {
+    return await erpGetList(doctype, {
       fields: supportedFields(fieldSet, MESSAGE_BASE_FIELDS),
-      filters: [[MESSAGE_TICKET_FIELD, "=", ticketName]],
+      filters: [[ticketField, "=", ticketName]],
       orderBy: "creation asc",
       limit,
       offset,
@@ -649,13 +706,16 @@ async function countUnreadAgentMessages(ticket) {
 }
 
 async function createMessageViaResource(ticketDoc, body) {
-  const fieldSet = await getMessageFieldSet();
-  if (!fieldSet) {
-    throw Object.assign(new Error(`${MESSAGE_DOCTYPE} is not available on ERP`), { status: 404 });
+  const resource = await getMessageResource(ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0]);
+  const fieldSet = resource?.fieldSet || null;
+  if (!resource || !fieldSet) {
+    throw Object.assign(new Error(`${MESSAGE_DOCTYPE_CANDIDATES.join(" / ")} is not available on ERP`), { status: 404 });
   }
+  const ticketField = resource.ticketField || MESSAGE_TICKET_FIELD;
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
   const doc = filterDocForFields(
     {
+      [ticketField]: ticketDoc.name,
       [MESSAGE_TICKET_FIELD]: ticketDoc.name,
       ticket: ticketDoc.name,
       ticket_id: ticketDoc.name,
@@ -670,7 +730,8 @@ async function createMessageViaResource(ticketDoc, body) {
     },
     fieldSet,
   );
-  return erpCreate(MESSAGE_DOCTYPE, doc);
+  console.log(`[supportTickets] Creating message in ${resource.doctype}.${ticketField} for ${ticketDoc.name}`);
+  return erpCreate(resource.doctype, doc);
 }
 
 async function createMessageViaEmbeddedTicket(ticketDoc, body) {
@@ -717,13 +778,14 @@ async function createTicketMessage(ticketDoc, body) {
     const embedded = await createMessageViaEmbeddedTicket(ticketDoc, body);
     if (embedded) return embedded;
   } catch (e) {
-    console.warn("[supportTickets] Embedded ticket message append failed, trying message Resource API:", e.message);
+    console.warn("[supportTickets] Embedded ticket message append failed, trying message Resource API:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
   }
   return createMessageViaResource(ticketDoc, body);
 }
 
 function supportErrorResponse(e, fallback = "Support ticket chat is unavailable. Please try again.") {
   const raw = (e?.message || e || "").toString();
+  console.warn("[supportTickets] Chat route failed:", raw, e?.payload ? JSON.stringify(e.payload).slice(0, 800) : "");
   const message =
     raw.includes("Traceback") || raw.includes("frappe.exceptions") || raw.length > 240
       ? fallback
@@ -880,8 +942,10 @@ router.post("/:id/messages/read", async (req, res) => {
   try {
     const ticketDoc = await resolveTicket(req.params.id);
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
-    const fieldSet = await getMessageFieldSet();
-    if (fieldSet && !fieldSet.has(MESSAGE_TICKET_FIELD)) {
+    const resource = await getMessageResource(ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0]);
+    const fieldSet = resource?.fieldSet || null;
+    const ticketField = resource?.ticketField || MESSAGE_TICKET_FIELD;
+    if (!resource || (fieldSet && !fieldSet.has(ticketField))) {
       return res.json({ success: true, message: "Messages marked as read" });
     }
 
@@ -890,16 +954,16 @@ router.post("/:id/messages/read", async (req, res) => {
     if (messageIds.length > 0) {
       targets = messageIds;
     } else {
-      const rows = await erpGetList(MESSAGE_DOCTYPE, {
+      const rows = await erpGetList(resource.doctype, {
         fields: ["name"],
-        filters: [[MESSAGE_TICKET_FIELD, "=", ticketDoc.name]],
+        filters: [[ticketField, "=", ticketDoc.name]],
         limit: 100,
         orderBy: "creation desc",
       });
       targets = rows.map((row) => row.name).filter(Boolean);
     }
 
-    await Promise.all(targets.map((name) => erpUpdate(MESSAGE_DOCTYPE, name, {
+    await Promise.all(targets.map((name) => erpUpdate(resource.doctype, name, {
       is_read: 1,
       read_at: nowFrappeDatetime(),
     })));
