@@ -486,20 +486,29 @@ async function getMessages(ticketName, { limit = 100, offset = 0 } = {}) {
 
 async function countUnreadAgentMessages(ticketName) {
   const fieldSet = await getMessageFieldSet();
-  if (fieldSet && (!fieldSet.has(MESSAGE_TICKET_FIELD) || !fieldSet.has("sender_type") || !fieldSet.has("is_read"))) {
+  if (fieldSet && (!fieldSet.has(MESSAGE_TICKET_FIELD) || !fieldSet.has("sender_type"))) {
     return 0;
   }
   try {
     const rows = await erpGetList(MESSAGE_DOCTYPE, {
-      fields: supportedFields(fieldSet, ["name", "sender_type", "is_read"]),
+      fields: supportedFields(fieldSet, ["name", "sender_type", "creation", "timestamp"]),
       filters: [[MESSAGE_TICKET_FIELD, "=", ticketName]],
       limit: 100,
-      orderBy: "creation desc",
+      orderBy: "creation asc",
     });
+    let latestUserReplyAt = null;
+    for (const row of rows) {
+      const senderType = (row.sender_type || "").toString().trim().toLowerCase();
+      if (senderType === "agent") continue;
+      const at = new Date(row.timestamp || row.creation || 0).getTime();
+      if (!at) continue;
+      if (latestUserReplyAt == null || at > latestUserReplyAt) latestUserReplyAt = at;
+    }
     return rows.filter((row) => {
       const senderType = (row.sender_type || "").toString().trim().toLowerCase();
-      const isRead = row.is_read === 1 || row.is_read === true || row.is_read === "1";
-      return senderType === "agent" && !isRead;
+      if (senderType !== "agent") return false;
+      const at = new Date(row.timestamp || row.creation || 0).getTime();
+      return latestUserReplyAt == null || (at && at > latestUserReplyAt);
     }).length;
   } catch (_) {
     return 0;
