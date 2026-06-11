@@ -280,36 +280,6 @@ async function nextTicketNumber(doctype) {
 
 async function findTickets({ userId, userLinkName, userEmail, userPhone, userName, status, limit, offset }) {
   try {
-    const { data } = await callFirstSupportMethod(SUPPORT_LOOKUP_METHODS, {
-      method: "GET",
-      query: {
-        external_id: userId,
-        customer_id: userId,
-        patient_id: userId,
-        user_id: userId,
-        mobile_user_id: userLinkName,
-        email: userEmail,
-        phone: userPhone,
-        mobile: userPhone,
-        phone_number: userPhone,
-        status,
-        limit,
-        offset,
-      },
-    });
-    const rows = ticketRowsFromMethodData(data)
-      .sort((a, b) => {
-        const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
-        const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
-        return bt - at;
-      })
-      .slice(0, limit);
-    if (rows.length > 0) return rows;
-  } catch (e) {
-    console.warn("[supportTickets] mobile_app support lookup failed, trying users_lookup engagement fallback:", e.message);
-  }
-
-  try {
     const parsed = await erpCallMethod("mobile_app.api.v1.users_lookup", {
       method: "GET",
       appToken: true,
