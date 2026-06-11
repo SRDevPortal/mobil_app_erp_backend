@@ -33,12 +33,13 @@ router.use(optionalSupportUserMiddleware);
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
 const MESSAGE_DOCTYPE = (process.env.ERP_MESSAGE_DOCTYPE || "Support Ticket Message").trim();
 const SUPPORT_RESOURCE_DOCTYPES = [
+  "App Support Ticket",
   process.env.ERP_TICKET_DOCTYPE,
   DOCTYPE.MOBILE_APP_SUPPORT_TICKET,
-  "App Support Ticket",
   "Support Ticket",
 ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const RESOURCE_FIELD_CACHE = new Map();
+const RESOURCE_META_CACHE = new Map();
 const SUPPORT_BASE_FIELDS = [
   "name",
   "ticket_number",
@@ -317,16 +318,30 @@ function addQueries(queries, fields, value, status) {
 
 async function getResourceFieldSet(doctype) {
   if (RESOURCE_FIELD_CACHE.has(doctype)) return RESOURCE_FIELD_CACHE.get(doctype);
+  const meta = await getResourceMeta(doctype);
+  const fields = meta ? fieldsFromMeta(meta) : null;
+  RESOURCE_FIELD_CACHE.set(doctype, fields);
+  return fields;
+}
+
+function fieldsFromMeta(meta) {
+  if (!meta) return null;
+  const fields = new Set(["name", "owner", "creation", "modified", "modified_by", "docstatus", "idx"]);
+  for (const field of meta?.fields || []) {
+    if (field?.fieldname) fields.add(String(field.fieldname));
+  }
+  return fields;
+}
+
+async function getResourceMeta(doctype) {
+  if (RESOURCE_META_CACHE.has(doctype)) return RESOURCE_META_CACHE.get(doctype);
   try {
     const meta = await erpGetDoc("DocType", doctype);
-    const fields = new Set(["name", "owner", "creation", "modified", "modified_by", "docstatus", "idx"]);
-    for (const field of meta?.fields || []) {
-      if (field?.fieldname) fields.add(String(field.fieldname));
-    }
-    RESOURCE_FIELD_CACHE.set(doctype, fields);
-    return fields;
+    RESOURCE_META_CACHE.set(doctype, meta || null);
+    return meta || null;
   } catch (e) {
     console.warn(`[supportTickets] Could not read DocType metadata for ${doctype}; trying candidate fields:`, e.message);
+    RESOURCE_META_CACHE.set(doctype, null);
     RESOURCE_FIELD_CACHE.set(doctype, null);
     return null;
   }
@@ -560,14 +575,29 @@ function embeddedMessagesFromTicket(ticketDoc = {}) {
   return rows;
 }
 
-function embeddedMessageField(ticketDoc = {}, fieldSet = null) {
+function embeddedMessageField(ticketDoc = {}, fieldSet = null, meta = null) {
   for (const field of EMBEDDED_MESSAGE_FIELDS) {
     const value = ticketDoc[field];
     const list = Array.isArray(value) ? value : safeJsonParse(value, null);
-    if (Array.isArray(list)) return field;
+    if (Array.isArray(list)) {
+      const metaField = (meta?.fields || []).find((f) => f?.fieldname === field) || null;
+      return { fieldname: field, childDoctype: metaField?.options || null };
+    }
+  }
+  const tableFields = (meta?.fields || []).filter((field) => {
+    const fieldtype = (field?.fieldtype || "").toString().toLowerCase();
+    return field?.fieldname && fieldtype === "table";
+  });
+  const preferredTable = tableFields.find((field) => {
+    const haystack = `${field.fieldname || ""} ${field.label || ""} ${field.options || ""}`.toLowerCase();
+    return /message|conversation|chat|reply|comment|communication/.test(haystack);
+  }) || (tableFields.length === 1 ? tableFields[0] : null);
+  if (preferredTable) {
+    return { fieldname: preferredTable.fieldname, childDoctype: preferredTable.options || null };
   }
   if (fieldSet) {
-    return EMBEDDED_MESSAGE_FIELDS.find((field) => fieldSet.has(field)) || null;
+    const fieldname = EMBEDDED_MESSAGE_FIELDS.find((field) => fieldSet.has(field)) || null;
+    if (fieldname) return { fieldname, childDoctype: null };
   }
   return null;
 }
@@ -620,6 +650,9 @@ async function countUnreadAgentMessages(ticket) {
 
 async function createMessageViaResource(ticketDoc, body) {
   const fieldSet = await getMessageFieldSet();
+  if (!fieldSet) {
+    throw Object.assign(new Error(`${MESSAGE_DOCTYPE} is not available on ERP`), { status: 404 });
+  }
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
   const doc = filterDocForFields(
     {
@@ -643,15 +676,21 @@ async function createMessageViaResource(ticketDoc, body) {
 async function createMessageViaEmbeddedTicket(ticketDoc, body) {
   const doctype = ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0];
   if (!doctype || !ticketDoc.name) return null;
+  const meta = await getResourceMeta(doctype);
   const fieldSet = await getResourceFieldSet(doctype);
-  const field = embeddedMessageField(ticketDoc, fieldSet);
-  if (!field) return null;
+  const embeddedField = embeddedMessageField(ticketDoc, fieldSet, meta);
+  if (!embeddedField?.fieldname) return null;
 
+  const field = embeddedField.fieldname;
   const existingValue = ticketDoc[field];
   const existingRows = Array.isArray(existingValue) ? existingValue : safeJsonParse(existingValue, []);
   const rows = Array.isArray(existingRows) ? [...existingRows] : [];
   const now = nowFrappeDatetime();
   const row = {
+    ...(embeddedField.childDoctype ? { doctype: embeddedField.childDoctype } : {}),
+    parent: ticketDoc.name,
+    parenttype: doctype,
+    parentfield: field,
     sender_type: "User",
     sender_id: body.user_id || "",
     sender_name: body.user_name || "User",
@@ -681,6 +720,15 @@ async function createTicketMessage(ticketDoc, body) {
     console.warn("[supportTickets] Embedded ticket message append failed, trying message Resource API:", e.message);
   }
   return createMessageViaResource(ticketDoc, body);
+}
+
+function supportErrorResponse(e, fallback = "Support ticket chat is unavailable. Please try again.") {
+  const raw = (e?.message || e || "").toString();
+  const message =
+    raw.includes("Traceback") || raw.includes("frappe.exceptions") || raw.length > 240
+      ? fallback
+      : raw || fallback;
+  return { status: e?.status || 500, body: { success: false, message } };
 }
 
 function isPluginPath(req) {
@@ -726,7 +774,8 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (e) {
-    return res.status(e.status || 500).json({ success: false, message: e.message });
+    const out = supportErrorResponse(e, "Support ticket conversation could not be loaded.");
+    return res.status(out.status).json(out.body);
   }
 });
 
@@ -782,7 +831,8 @@ router.post("/", async (req, res) => {
     if (isPluginPath(req)) return res.status(201).json({ success: true, data: { ticket } });
     return res.status(201).json({ success: true, data: saved });
   } catch (e) {
-    return res.status(e.status || 500).json({ success: false, message: e.message });
+    const out = supportErrorResponse(e, "Support ticket conversation could not be loaded.");
+    return res.status(out.status).json(out.body);
   }
 });
 
@@ -793,7 +843,8 @@ router.get("/:id", async (req, res) => {
     const messages = (await getAllTicketMessages(ticketDoc)).map(mapMessage);
     return res.json({ success: true, data: { ticket: mapTicket(ticketDoc), messages } });
   } catch (e) {
-    return res.status(e.status || 500).json({ success: false, message: e.message });
+    const out = supportErrorResponse(e, "Support ticket conversation could not be loaded.");
+    return res.status(out.status).json(out.body);
   }
 });
 
