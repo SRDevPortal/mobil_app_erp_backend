@@ -19,8 +19,10 @@ router.use(resolveUserMiddleware);
 
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
 const SUPPORT_RESOURCE_DOCTYPES = [
-  process.env.ERP_TICKET_DOCTYPE || "Support Ticket",
+  process.env.ERP_TICKET_DOCTYPE,
   DOCTYPE.MOBILE_APP_SUPPORT_TICKET,
+  "App Support Ticket",
+  "Support Ticket",
 ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const RESOURCE_FIELD_CACHE = new Map();
 const SUPPORT_BASE_FIELDS = [

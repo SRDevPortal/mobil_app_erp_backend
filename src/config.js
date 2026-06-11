@@ -73,7 +73,7 @@ const DOCTYPE = {
   MOBILE_APP_DOCTOR: trim(process.env.DOCTYPE_MOBILE_APP_DOCTOR || "Mobile App Doctor"),
   MOBILE_APP_APPOINTMENT: trim(process.env.DOCTYPE_MOBILE_APP_APPOINTMENT || "Mobile App Appointment"),
   MOBILE_APP_NOTIFICATION: trim(process.env.DOCTYPE_MOBILE_APP_NOTIFICATION || "Mobile App Notification"),
-  MOBILE_APP_SUPPORT_TICKET: trim(process.env.DOCTYPE_MOBILE_APP_SUPPORT_TICKET || "Mobile App Support Ticket"),
+  MOBILE_APP_SUPPORT_TICKET: trim(process.env.DOCTYPE_MOBILE_APP_SUPPORT_TICKET || "App Support Ticket"),
   MOBILE_APP_WEBHOOK_EVENT: trim(process.env.DOCTYPE_MOBILE_APP_WEBHOOK_EVENT || "Mobile App Webhook Event"),
 };
 
