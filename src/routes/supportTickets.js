@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
-const { erpCallMethod, erpGetDoc, erpGetList } = require("../frappeClient");
+const { erpCallMethod, erpCreate, erpGetDoc, erpGetList } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, pickExternalId } = require("../normalize");
@@ -101,6 +101,14 @@ function toFrappeStatus(value) {
   return "Open";
 }
 
+function toFrappePriority(value) {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "low") return "Low";
+  if (normalized === "high") return "High";
+  if (normalized === "urgent") return "Urgent";
+  return "Medium";
+}
+
 function toIso(value, fallback = null) {
   if (!value) return fallback;
   const d = new Date(value);
@@ -176,7 +184,13 @@ async function callFirstSupportMethod(methods, options) {
       return { method, data };
     } catch (e) {
       firstError = firstError || e;
-      if (e.status && e.status !== 404) break;
+      const message = (e.message || "").toString();
+      const missingMethod =
+        e.status === 404 ||
+        message.includes("has no attribute") ||
+        message.includes("Failed to get method") ||
+        message.includes("Unknown method");
+      if (e.status && !missingMethod) break;
     }
   }
   throw firstError || new Error("No support method configured");
@@ -230,6 +244,38 @@ async function getResourceFieldSet(doctype) {
 function supportedFields(fields, candidates) {
   if (!fields) return candidates;
   return candidates.filter((field) => fields.has(field));
+}
+
+function filterDocForFields(doc, fieldSet) {
+  if (!fieldSet) return doc;
+  const out = {};
+  for (const [key, value] of Object.entries(doc)) {
+    if (fieldSet.has(key) && value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+async function nextTicketNumber(doctype) {
+  const year = new Date().getFullYear();
+  const prefix = `TKT-${year}-`;
+  try {
+    const rows = await erpGetList(doctype, {
+      fields: ["ticket_number"],
+      filters: [["ticket_number", "like", `${prefix}%`]],
+      limit: 100,
+      orderBy: "creation desc",
+    });
+    let max = 0;
+    for (const row of rows) {
+      const match = String(row.ticket_number || "").match(/(\d+)$/);
+      if (!match) continue;
+      const value = parseInt(match[1], 10);
+      if (!Number.isNaN(value) && value > max) max = value;
+    }
+    return `${prefix}${String(max + 1).padStart(6, "0")}`;
+  } catch (_) {
+    return `${prefix}${String(Date.now()).slice(-6)}`;
+  }
 }
 
 async function findTickets({ userId, userLinkName, userEmail, userPhone, userName, status, limit, offset }) {
@@ -303,21 +349,27 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
   const byName = new Map();
   for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
     const fieldSet = await getResourceFieldSet(doctype);
-    const fields = supportedFields(fieldSet, SUPPORT_BASE_FIELDS);
     for (const filters of queries) {
       const supportedFilters = fieldSet ? filters.filter(([field]) => fieldSet.has(field)) : filters;
       if (supportedFilters.length !== filters.length) continue;
       try {
-        const rows = await erpGetList(doctype, {
-          fields: fields.length ? fields : ["name", "creation", "modified"],
+        const nameRows = await erpGetList(doctype, {
+          fields: ["name"],
           filters: supportedFilters,
           limit,
           offset,
           orderBy: "modified desc",
         });
-        for (const row of rows) {
-          const key = row.name || row.ticket_number || JSON.stringify(row);
-          byName.set(`${doctype}:${key}`, row);
+        for (const row of nameRows) {
+          if (!row?.name) continue;
+          const key = `${doctype}:${row.name}`;
+          if (byName.has(key)) continue;
+          try {
+            const doc = await erpGetDoc(doctype, row.name);
+            byName.set(key, doc || row);
+          } catch (_) {
+            byName.set(key, row);
+          }
         }
       } catch (e) {
         if (e.status !== 403 && e.status !== 404) {
@@ -337,6 +389,43 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
   if (resourceRows.length > 0) return resourceRows;
 
   return [];
+}
+
+async function createTicketViaResource(body, { externalId, userLinkName }) {
+  const doctype = SUPPORT_RESOURCE_DOCTYPES[0];
+  const fieldSet = await getResourceFieldSet(doctype);
+  const requesterName = (body.requester_name || body.name || body.user_name || "").toString().trim();
+  const email = (body.email || body.user_email || "").toString().trim();
+  const phone = (body.phone || body.user_phone || "").toString().trim();
+  const doc = filterDocForFields(
+    {
+      ticket_number: await nextTicketNumber(doctype),
+      external_id: externalId,
+      customer_id: externalId,
+      supabase_user_id: externalId,
+      patient_id: externalId,
+      mobile_user_id: userLinkName,
+      user_id: externalId || userLinkName,
+      customer_name: requesterName,
+      requester_name: requesterName,
+      user_name: requesterName,
+      patient_name: requesterName,
+      email,
+      user_email: email,
+      phone,
+      user_phone: phone,
+      subject: body.subject,
+      title: body.subject,
+      description: body.description,
+      message: body.description,
+      status: toFrappeStatus(body.status || "open"),
+      priority: toFrappePriority(body.priority),
+      category: body.category || null,
+      metadata: JSON.stringify({ source: "mobile_app", user_link_name: userLinkName || null }),
+    },
+    fieldSet,
+  );
+  return erpCreate(doctype, doc);
 }
 
 async function resolveTicket(id) {
@@ -434,17 +523,32 @@ router.post("/", async (req, res) => {
     );
     let saved = null;
     try {
-      const { data } = await callFirstSupportMethod(SUPPORT_SYNC_METHODS, {
-        method: "POST",
-        body: doc,
-      });
-      saved = Array.isArray(data) ? data[0] : data;
-    } catch (e) {
-      return res.status(e.status || 502).json({
-        success: false,
-        message: "Support ticket sync method failed",
-        error: e.message,
-      });
+      saved = await createTicketViaResource(
+        {
+          ...body,
+          external_id,
+          requester_name: requesterName,
+          email: body.email || body.user_email,
+          phone: body.phone || body.user_phone,
+          status: body.status || "open",
+        },
+        { externalId: external_id, userLinkName: req.userLinkName },
+      );
+    } catch (resourceError) {
+      console.warn("[supportTickets] Resource API ticket create failed, trying mobile_app method fallback:", resourceError.message);
+      try {
+        const { data } = await callFirstSupportMethod(SUPPORT_SYNC_METHODS, {
+          method: "POST",
+          body: doc,
+        });
+        saved = Array.isArray(data) ? data[0] : data;
+      } catch (_) {
+        return res.status(resourceError.status || 502).json({
+          success: false,
+          message: "Support ticket Resource API create failed",
+          error: resourceError.message,
+        });
+      }
     }
     const ticket = mapTicket(saved || {});
     if (isPluginPath(req)) return res.status(201).json({ success: true, data: { ticket } });
