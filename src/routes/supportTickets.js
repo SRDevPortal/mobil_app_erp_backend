@@ -713,25 +713,47 @@ async function createMessageViaResource(ticketDoc, body) {
   }
   const ticketField = resource.ticketField || MESSAGE_TICKET_FIELD;
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
-  const doc = filterDocForFields(
-    {
-      [ticketField]: ticketDoc.name,
-      [MESSAGE_TICKET_FIELD]: ticketDoc.name,
-      ticket: ticketDoc.name,
-      ticket_id: ticketDoc.name,
-      sender_type: "User",
-      sender_id: body.user_id,
-      sender_name: body.user_name || "User",
-      message: body.message,
-      attachment: attachments.length > 0 ? attachments[0] : "",
-      attachments: JSON.stringify(attachments),
-      timestamp: nowFrappeDatetime(),
-      is_read: 0,
-    },
-    fieldSet,
-  );
-  console.log(`[supportTickets] Creating message in ${resource.doctype}.${ticketField} for ${ticketDoc.name}`);
-  return erpCreate(resource.doctype, doc);
+  const ticketRefs = [
+    ticketDoc.name,
+    ticketDoc.ticket_number,
+    ticketDoc.id,
+  ].map((v) => (v || "").toString().trim()).filter(Boolean);
+  let lastError = null;
+  for (const ticketRef of [...new Set(ticketRefs)]) {
+    const doc = filterDocForFields(
+      {
+        [ticketField]: ticketRef,
+        [MESSAGE_TICKET_FIELD]: ticketRef,
+        ticket: ticketRef,
+        ticket_id: ticketRef,
+        support_ticket: ticketRef,
+        app_support_ticket: ticketRef,
+        sender_type: "User",
+        sender_id: body.user_id,
+        sender_name: body.user_name || "User",
+        message: body.message,
+        attachment: attachments.length > 0 ? attachments[0] : "",
+        attachments: JSON.stringify(attachments),
+        timestamp: nowFrappeDatetime(),
+        is_read: 0,
+      },
+      fieldSet,
+    );
+    try {
+      console.log(`[supportTickets] Creating message in ${resource.doctype}.${ticketField} for ${ticketRef}`);
+      return await erpCreate(resource.doctype, doc);
+    } catch (e) {
+      lastError = e;
+      const raw = (e.message || "").toString();
+      const canRetry =
+        raw.includes("Could not find") ||
+        raw.includes("LinkValidationError") ||
+        raw.includes("Invalid Link");
+      console.warn(`[supportTickets] Message create failed for ticket ref ${ticketRef}:`, raw);
+      if (!canRetry) break;
+    }
+  }
+  throw lastError || new Error("Support ticket message could not be saved.");
 }
 
 async function createMessageViaEmbeddedTicket(ticketDoc, body) {
