@@ -307,10 +307,10 @@ function mapMessage(doc = {}) {
   const senderType = normalizeSenderType(doc.sender_type, doc);
   return {
     id: doc.name || doc.id || "",
-    ticket_id: doc[MESSAGE_TICKET_FIELD] || doc.ticket || doc.ticket_id || "",
+    ticket_id: doc[MESSAGE_TICKET_FIELD] || doc.ticket || doc.ticket_id || doc.reference_name || "",
     sender_type: senderType,
     sender_id: doc.sender_id || null,
-    sender_name: doc.sender_name || "",
+    sender_name: doc.sender_name || doc.comment_by || doc.owner || "",
     message: getMessageText(doc),
     attachments: Array.isArray(attachments) && attachments.length > 0 ? attachments : doc.attachment ? [doc.attachment] : [],
     is_read: doc.is_read === 1 || doc.is_read === true || doc.is_read === "1",
@@ -663,6 +663,50 @@ function metadataMessagesFromTicket(ticketDoc = {}) {
     }));
 }
 
+async function commentMessagesFromTicket(ticketDoc = {}, { limit = 100, offset = 0 } = {}) {
+  if (!ticketDoc.name) return [];
+  try {
+    const rows = await erpGetList("Comment", {
+      fields: [
+        "name",
+        "reference_doctype",
+        "reference_name",
+        "comment_type",
+        "comment_by",
+        "content",
+        "owner",
+        "creation",
+        "modified",
+      ],
+      filters: [
+        ["reference_doctype", "=", ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0]],
+        ["reference_name", "=", ticketDoc.name],
+      ],
+      orderBy: "creation asc",
+      limit,
+      offset,
+    });
+    return rows
+      .filter((row) => {
+        const type = (row.comment_type || "").toString().toLowerCase();
+        return !type || type === "comment" || type === "info";
+      })
+      .map((row) => ({
+        ...row,
+        ticket: ticketDoc.name,
+        sender_type: normalizeSenderType(row.sender_type, row),
+        sender_name: row.comment_by || row.owner || "",
+        message: row.content || "",
+        timestamp: row.creation,
+      }));
+  } catch (e) {
+    if (e.status !== 403 && e.status !== 404) {
+      console.warn("[supportTickets] Comment messages lookup failed:", e.message);
+    }
+    return [];
+  }
+}
+
 function embeddedMessageField(ticketDoc = {}, fieldSet = null, meta = null) {
   for (const field of EMBEDDED_MESSAGE_FIELDS) {
     const value = ticketDoc[field];
@@ -709,6 +753,10 @@ async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {})
     byKey.set(key, row);
   }
   for (const row of metadataMessagesFromTicket(ticketDoc)) {
+    const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
+    byKey.set(key, row);
+  }
+  for (const row of await commentMessagesFromTicket(ticketDoc, { limit, offset })) {
     const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
     byKey.set(key, row);
   }
@@ -861,6 +909,33 @@ async function createMessageViaTicketMetadata(ticketDoc, body) {
   return row;
 }
 
+async function createMessageViaComment(ticketDoc, body) {
+  const doctype = ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0];
+  if (!doctype || !ticketDoc.name) return null;
+  const now = nowFrappeDatetime();
+  const content = body.message;
+  const created = await erpCreate("Comment", {
+    reference_doctype: doctype,
+    reference_name: ticketDoc.name,
+    comment_type: "Comment",
+    comment_by: body.user_name || "User",
+    content,
+  });
+  return {
+    name: created?.name || `${ticketDoc.name}-comment-${Date.now()}`,
+    ticket: ticketDoc.name,
+    reference_doctype: doctype,
+    reference_name: ticketDoc.name,
+    sender_type: "User",
+    sender_id: body.user_id || "",
+    sender_name: body.user_name || created?.comment_by || "User",
+    message: created?.content || content,
+    timestamp: created?.creation || now,
+    creation: created?.creation || now,
+    is_read: 0,
+  };
+}
+
 async function createTicketMessage(ticketDoc, body) {
   try {
     const embedded = await createMessageViaEmbeddedTicket(ticketDoc, body);
@@ -871,7 +946,13 @@ async function createTicketMessage(ticketDoc, body) {
   try {
     return await createMessageViaResource(ticketDoc, body);
   } catch (e) {
-    console.warn("[supportTickets] Message Resource API create failed, trying ticket metadata:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
+    console.warn("[supportTickets] Message Resource API create failed, trying Comment:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
+  }
+  try {
+    const comment = await createMessageViaComment(ticketDoc, body);
+    if (comment) return comment;
+  } catch (e) {
+    console.warn("[supportTickets] Comment create failed, trying ticket metadata:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
   }
   const metadata = await createMessageViaTicketMetadata(ticketDoc, body);
   if (metadata) return metadata;
