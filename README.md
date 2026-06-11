@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-**Windows (optional):** if you have not run `npm install` in this folder yet but the parent `backend` folder already has `node_modules`, you can run `.\start.ps1` from `backend-erp` (uses `Node` on your PATH and `..\node_modules`). Normal workflow is still `npm install` inside `backend-erp` after installing [Node.js](https://nodejs.org/).
+**Windows (optional):** after running `npm install` inside `backend-erp`, you can start the service with `.\start.ps1`. The ERP backend is standalone and does not use dependencies from the old support backend.
 
 - Health (no auth): `GET /api/health`
 - All other routes: header `X-ERP-Token: <APP_ERP_TOKEN>` or `Authorization: Bearer <APP_ERP_TOKEN>`
