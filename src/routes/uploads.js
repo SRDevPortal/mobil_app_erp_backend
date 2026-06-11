@@ -80,7 +80,7 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
         entry_id: `local_${Date.now()}_prescriptions_data`,
         entry_timestamp: nowIso,
         data_json: [entry],
-        source: "upload",
+        source: "App",
       };
       const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
       try {
