@@ -1,11 +1,10 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
-const crypto = require("crypto");
+const { erpCallMethod, erpGetDoc } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
-const { erpCreate } = require("../frappeClient");
-const { mapPrescriptionToFrappe } = require("../normalize");
-const { findMobileAppUser } = require("../services/userService");
+const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
+const { mergeHealthEntriesForToolSync } = require("../services/healthEntryRows");
 const { uploadPrescriptionToS3 } = require("../services/s3PrescriptionUpload");
 
 const router = express.Router();
@@ -39,27 +38,64 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
           {},
         )
         : null;
-      const prescriptionExternalId =
-        req.body?.external_id ||
-        req.body?.prescription_id ||
-        req.query?.external_id ||
-        crypto.randomUUID();
-      const doc = mapPrescriptionToFrappe(
-        {
-          external_id: prescriptionExternalId,
-          file_name: req.file?.originalname || uploaded.key,
-          file_type: req.file?.mimetype || path.extname(req.file?.originalname || uploaded.key).replace(/^\./, ""),
-          file_size: req.file?.size,
-          file_url: uploaded.url,
-          notes: req.body?.notes,
-          uploaded_at: req.body?.uploaded_at,
+      const parentExternalId = userRow?.external_id || userId;
+      if (!parentExternalId) throw new Error("Unable to resolve Mobile App User for prescription sync.");
+
+      let existing = [];
+      const lookup = await tryUsersLookupV1({ external_id: parentExternalId, supabase_user_id: parentExternalId });
+      if (Array.isArray(lookup?.health_entries)) {
+        existing = lookup.health_entries.map((r) => ({ ...r }));
+      } else if (userRow?.name) {
+        const userDoc = await erpGetDoc(DOCTYPE.MOBILE_APP_USER, userRow.name);
+        if (Array.isArray(userDoc?.health_entries)) existing = userDoc.health_entries.map((r) => ({ ...r }));
+      }
+
+      const nowIso = new Date().toISOString();
+      const fileName = req.file?.originalname || path.basename(uploaded.key);
+      const fileType = req.file?.mimetype || path.extname(fileName).replace(/^\./, "");
+      const isPdf = fileType === "application/pdf" || /\.pdf$/i.test(fileName);
+      const entry = {
+        id: req.body?.entry_id || req.body?.id || Date.now(),
+        logged_at: req.body?.logged_at || nowIso,
+        valDisplay: fileName,
+        date: req.body?.date,
+        upload_date: req.body?.upload_date || req.body?.date,
+        upload_time: req.body?.upload_time,
+        type: req.body?.type || (isPdf ? "PDF" : "Image"),
+        file_kind: isPdf ? "pdf" : "image",
+        time: req.body?.time || req.body?.upload_time,
+        doctor_name: req.body?.doctor_name,
+        clinic_name: req.body?.clinic_name,
+        doctor: req.body?.doctor || req.body?.doctor_name,
+        clinic: req.body?.clinic || req.body?.clinic_name,
+        file_url: uploaded.url,
+        file_name: fileName,
+        file_type: fileType,
+        file_size: req.file?.size,
+      };
+      const body = {
+        external_id: parentExternalId,
+        supabase_user_id: parentExternalId,
+        tool_key: "prescriptions_data",
+        entry_id: `local_${Date.now()}_prescriptions_data`,
+        entry_timestamp: nowIso,
+        data_json: [entry],
+        source: "upload",
+      };
+      const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
+      const parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
+        method: "POST",
+        appToken: true,
+        body: {
+          external_id: parentExternalId,
+          supabase_user_id: parentExternalId,
+          health_entries: next,
         },
-        userRow?.name || userId,
-      );
-      erpSaved = await erpCreate(DOCTYPE.MOBILE_APP_PRESCRIPTION, doc);
+      });
+      erpSaved = unwrapMobileAppV1Message(parsed) || parsed;
     } catch (e) {
       erpWarning = e.message || "Prescription uploaded to S3, but ERP save failed.";
-      console.warn("[uploads/prescription] ERP prescription save failed:", erpWarning);
+      console.warn("[uploads/prescription] ERP prescription health-entry sync failed:", erpWarning);
     }
     return res.status(201).json({
       success: true,
