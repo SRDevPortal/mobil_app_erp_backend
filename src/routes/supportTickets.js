@@ -327,9 +327,22 @@ async function getMessageFieldSet() {
 
 function messageFieldFromMeta(meta, ticketDoctype) {
   const fields = meta?.fields || [];
+  const compatible = (field) => {
+    if (!field?.fieldname) return false;
+    const fieldtype = (field.fieldtype || "").toString().toLowerCase();
+    const options = (field.options || "").toString().trim();
+    if (!["link", "dynamic link", "data"].includes(fieldtype)) return true;
+    if (!options) return true;
+    return options === ticketDoctype || SUPPORT_RESOURCE_DOCTYPES.includes(options);
+  };
   for (const candidate of MESSAGE_TICKET_FIELD_CANDIDATES) {
     const exact = fields.find((field) => field?.fieldname === candidate);
-    if (exact) return exact.fieldname;
+    if (exact && compatible(exact)) return exact.fieldname;
+    if (exact) {
+      console.warn(
+        `[supportTickets] Skipping message field ${meta?.name || ""}.${candidate}; it links to ${exact.options || "unknown"}, not ${ticketDoctype}`,
+      );
+    }
   }
   const byOptions = fields.find((field) => {
     const fieldtype = (field?.fieldtype || "").toString().toLowerCase();
@@ -339,7 +352,7 @@ function messageFieldFromMeta(meta, ticketDoctype) {
   if (byOptions) return byOptions.fieldname;
   const byName = fields.find((field) => {
     const haystack = `${field?.fieldname || ""} ${field?.label || ""} ${field?.options || ""}`.toLowerCase();
-    return field?.fieldname && /ticket/.test(haystack);
+    return field?.fieldname && /ticket/.test(haystack) && compatible(field);
   });
   return byName?.fieldname || null;
 }
@@ -351,7 +364,11 @@ async function getMessageResource(ticketDoctype = "App Support Ticket") {
     const meta = await getResourceMeta(doctype);
     if (!meta) continue;
     const fieldSet = fieldsFromMeta(meta);
-    const ticketField = messageFieldFromMeta(meta, ticketDoctype) || MESSAGE_TICKET_FIELD;
+    const ticketField = messageFieldFromMeta(meta, ticketDoctype);
+    if (!ticketField) {
+      console.warn(`[supportTickets] Skipping message DocType ${doctype}; no compatible ticket link field for ${ticketDoctype}`);
+      continue;
+    }
     const resource = { doctype, meta, fieldSet, ticketField };
     MESSAGE_RESOURCE_CACHE.value = resource;
     console.log(`[supportTickets] Using message DocType ${doctype} with ticket field ${ticketField}`);
@@ -632,6 +649,20 @@ function embeddedMessagesFromTicket(ticketDoc = {}) {
   return rows;
 }
 
+function metadataMessagesFromTicket(ticketDoc = {}) {
+  const metadata = safeJsonParse(ticketDoc.metadata, null);
+  const rows = Array.isArray(metadata?.support_messages) ? metadata.support_messages : [];
+  return rows
+    .filter((row) => row && typeof row === "object" && getMessageText(row))
+    .map((row, index) => ({
+      ...row,
+      name: row.name || `${ticketDoc.name || ticketDoc.ticket_number || "ticket"}-metadata-${index}`,
+      [MESSAGE_TICKET_FIELD]: row[MESSAGE_TICKET_FIELD] || ticketDoc.name || ticketDoc.ticket_number,
+      ticket: row.ticket || ticketDoc.name || ticketDoc.ticket_number,
+      creation: row.creation || row.timestamp || ticketDoc.creation,
+    }));
+}
+
 function embeddedMessageField(ticketDoc = {}, fieldSet = null, meta = null) {
   for (const field of EMBEDDED_MESSAGE_FIELDS) {
     const value = ticketDoc[field];
@@ -674,6 +705,10 @@ async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {})
     }
   }
   for (const row of embeddedMessagesFromTicket(ticketDoc)) {
+    const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
+    byKey.set(key, row);
+  }
+  for (const row of metadataMessagesFromTicket(ticketDoc)) {
     const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
     byKey.set(key, row);
   }
@@ -795,6 +830,37 @@ async function createMessageViaEmbeddedTicket(ticketDoc, body) {
   };
 }
 
+async function createMessageViaTicketMetadata(ticketDoc, body) {
+  const doctype = ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0];
+  const fieldSet = await getResourceFieldSet(doctype);
+  if (!fieldSet?.has("metadata") || !ticketDoc.name) return null;
+
+  const metadata = safeJsonParse(ticketDoc.metadata, {}) || {};
+  const rows = Array.isArray(metadata.support_messages) ? [...metadata.support_messages] : [];
+  const now = nowFrappeDatetime();
+  const row = {
+    name: `${ticketDoc.name}-metadata-${rows.length}`,
+    ticket: ticketDoc.name,
+    ticket_number: ticketDoc.ticket_number || "",
+    sender_type: "User",
+    sender_id: body.user_id || "",
+    sender_name: body.user_name || "User",
+    message: body.message,
+    timestamp: now,
+    creation: now,
+    is_read: 0,
+    source: "mobile_app",
+  };
+  rows.push(row);
+  const updatedMetadata = {
+    ...metadata,
+    support_messages: rows,
+  };
+  const updated = await erpUpdate(doctype, ticketDoc.name, { metadata: JSON.stringify(updatedMetadata) });
+  ticketDoc.metadata = updated?.metadata || JSON.stringify(updatedMetadata);
+  return row;
+}
+
 async function createTicketMessage(ticketDoc, body) {
   try {
     const embedded = await createMessageViaEmbeddedTicket(ticketDoc, body);
@@ -802,7 +868,14 @@ async function createTicketMessage(ticketDoc, body) {
   } catch (e) {
     console.warn("[supportTickets] Embedded ticket message append failed, trying message Resource API:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
   }
-  return createMessageViaResource(ticketDoc, body);
+  try {
+    return await createMessageViaResource(ticketDoc, body);
+  } catch (e) {
+    console.warn("[supportTickets] Message Resource API create failed, trying ticket metadata:", e.message, e.payload ? JSON.stringify(e.payload).slice(0, 600) : "");
+  }
+  const metadata = await createMessageViaTicketMetadata(ticketDoc, body);
+  if (metadata) return metadata;
+  throw new Error("Support ticket message could not be saved in ERP.");
 }
 
 function supportErrorResponse(e, fallback = "Support ticket chat is unavailable. Please try again.") {
