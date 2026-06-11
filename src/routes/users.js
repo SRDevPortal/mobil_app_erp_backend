@@ -2,7 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
 const { DOCTYPE } = require("../config");
-const { erpCreate, erpUpdate, erpGetList } = require("../frappeClient");
+const { erpCreate, erpUpdate, erpGetList, erpCallMethod } = require("../frappeClient");
 const { uploadProfileImageToS3 } = require("../services/s3PrescriptionUpload");
 const {
   findMobileAppUser,
@@ -35,6 +35,41 @@ async function updateMobileAppUserImageFields(userName, profileImageUrl) {
     }
   }
   throw lastError || new Error("Unable to update profile image fields");
+}
+
+function unwrapMethodData(parsed) {
+  const msg = parsed?.message;
+  if (msg && typeof msg === "object") {
+    if (msg.success === false) return null;
+    return msg.data ?? msg.user ?? msg;
+  }
+  return parsed?.data ?? null;
+}
+
+async function syncMobileAppUserImageViaV1({ external_id, supabase_user_id, profileImageUrl }) {
+  const body = {
+    external_id,
+    supabase_user_id,
+    profile_image_url: profileImageUrl,
+    avatar_url: profileImageUrl,
+    image: profileImageUrl,
+    updated_at: new Date().toISOString(),
+  };
+  const parsed = await erpCallMethod("mobile_app.api.v1.users_sync", {
+    method: "POST",
+    appToken: true,
+    body,
+  });
+  return unwrapMethodData(parsed);
+}
+
+function erpUserHasProfileImage(user, profileImageUrl) {
+  if (!user || !profileImageUrl) return false;
+  const wanted = String(profileImageUrl).trim();
+  return ["profile_image_url", "avatar_url", "image", "avatar_display_url"].some((key) => {
+    const value = user[key] != null ? String(user[key]).trim() : "";
+    return value === wanted;
+  });
 }
 
 router.post("/sync", async (req, res) => {
@@ -141,6 +176,7 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
     let saved = null;
     let resolvedExternal = external_id || supabase_user_id;
     let persistWarning = null;
+    let persistedToErp = false;
     try {
       const imageDoc = {
         profile_image_url,
@@ -164,9 +200,45 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
         saved = result.saved;
         resolvedExternal = result.external_id || resolvedExternal;
       }
+      persistedToErp = erpUserHasProfileImage(saved, profile_image_url);
     } catch (e) {
-      persistWarning = e.message || "Profile image uploaded, but ERP user record update failed.";
-      console.warn("[users/profile-image] ERP user image URL update failed:", persistWarning);
+      persistWarning = e.message || "Resource API profile image update failed.";
+      console.warn("[users/profile-image] Resource API image URL update failed:", persistWarning);
+    }
+
+    if (!persistedToErp) {
+      try {
+        const v1Saved = await syncMobileAppUserImageViaV1({
+          external_id: resolvedExternal,
+          supabase_user_id,
+          profileImageUrl: profile_image_url,
+        });
+        if (v1Saved && typeof v1Saved === "object") {
+          saved = v1Saved;
+          persistedToErp = erpUserHasProfileImage(saved, profile_image_url);
+          persistWarning = persistedToErp ? null : "ERP V1 sync returned without the profile image URL.";
+        }
+      } catch (e) {
+        persistWarning = `${persistWarning ? `${persistWarning}; ` : ""}V1 profile image sync failed: ${e.message}`;
+        console.warn("[users/profile-image] V1 image URL sync failed:", e.message);
+      }
+    }
+
+    try {
+      const verified = await getMobileAppUserForApi(
+        { external_id: resolvedExternal, supabase_user_id },
+        {},
+        {},
+      );
+      if (verified && typeof verified === "object") {
+        saved = { ...saved, ...verified };
+        persistedToErp = erpUserHasProfileImage(verified, profile_image_url);
+        if (!persistedToErp && !persistWarning) {
+          persistWarning = "ERP lookup did not return the uploaded profile image URL after save.";
+        }
+      }
+    } catch (e) {
+      persistWarning = `${persistWarning ? `${persistWarning}; ` : ""}ERP lookup verification failed: ${e.message}`;
     }
 
     return res.json({
@@ -177,6 +249,7 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
         avatar_url: profile_image_url || saved?.avatar_url || null,
         image: profile_image_url || saved?.image || null,
         upload_key: uploaded.key,
+        erp_persisted: persistedToErp,
         ...(persistWarning ? { warning: persistWarning } : {}),
       },
     });
