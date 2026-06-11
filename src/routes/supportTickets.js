@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
-const { erpCallMethod, erpGetList } = require("../frappeClient");
+const { erpCallMethod, erpGetDoc, erpGetList } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, pickExternalId } = require("../normalize");
@@ -22,6 +22,43 @@ const SUPPORT_RESOURCE_DOCTYPES = [
   process.env.ERP_TICKET_DOCTYPE || "Support Ticket",
   DOCTYPE.MOBILE_APP_SUPPORT_TICKET,
 ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+const RESOURCE_FIELD_CACHE = new Map();
+const SUPPORT_BASE_FIELDS = [
+  "name",
+  "ticket_number",
+  "customer_name",
+  "requester_name",
+  "user_name",
+  "patient_name",
+  "name_text",
+  "email",
+  "user_email",
+  "email_id",
+  "raised_by",
+  "phone",
+  "user_phone",
+  "mobile_number",
+  "subject",
+  "title",
+  "description",
+  "message",
+  "status",
+  "priority",
+  "category",
+  "assigned_to",
+  "assigned_to_name",
+  "external_id",
+  "user_id",
+  "patient_id",
+  "mobile_user_id",
+  "customer_id",
+  "supabase_user_id",
+  "creation",
+  "modified",
+  "resolved_at",
+  "closed_at",
+  "metadata",
+];
 const SUPPORT_LOOKUP_METHODS = [
   "mobile_app.api.v1.support_tickets_lookup",
   "mobile_app.api.v1.support_tickets_list",
@@ -173,7 +210,29 @@ function addQueries(queries, fields, value, status) {
   }
 }
 
-async function findTickets({ userId, userLinkName, userEmail, userPhone, status, limit, offset }) {
+async function getResourceFieldSet(doctype) {
+  if (RESOURCE_FIELD_CACHE.has(doctype)) return RESOURCE_FIELD_CACHE.get(doctype);
+  try {
+    const meta = await erpGetDoc("DocType", doctype);
+    const fields = new Set(["name", "owner", "creation", "modified", "modified_by", "docstatus", "idx"]);
+    for (const field of meta?.fields || []) {
+      if (field?.fieldname) fields.add(String(field.fieldname));
+    }
+    RESOURCE_FIELD_CACHE.set(doctype, fields);
+    return fields;
+  } catch (e) {
+    console.warn(`[supportTickets] Could not read DocType metadata for ${doctype}; trying candidate fields:`, e.message);
+    RESOURCE_FIELD_CACHE.set(doctype, null);
+    return null;
+  }
+}
+
+function supportedFields(fields, candidates) {
+  if (!fields) return candidates;
+  return candidates.filter((field) => fields.has(field));
+}
+
+async function findTickets({ userId, userLinkName, userEmail, userPhone, userName, status, limit, offset }) {
   try {
     const { data } = await callFirstSupportMethod(SUPPORT_LOOKUP_METHODS, {
       method: "GET",
@@ -235,18 +294,23 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
   }
 
   const queries = [];
-  addQueries(queries, ["external_id", "user_id", "patient_id", "mobile_user_id"], userId, status);
-  addQueries(queries, ["user_id", "mobile_user_id"], userLinkName, status);
-  addQueries(queries, ["email", "user_email", "customer_email"], userEmail, status);
-  addQueries(queries, ["phone", "user_phone", "mobile_number"], userPhone, status);
+  addQueries(queries, ["external_id", "user_id", "patient_id", "mobile_user_id", "customer_id", "supabase_user_id"], userId, status);
+  addQueries(queries, ["user_id", "mobile_user_id", "patient_id", "customer_id"], userLinkName, status);
+  addQueries(queries, ["email", "user_email", "email_id", "raised_by", "customer_email"], userEmail, status);
+  addQueries(queries, ["phone", "user_phone", "mobile_number", "phone_number", "mobile"], userPhone, status);
+  addQueries(queries, ["customer_name", "requester_name", "user_name", "patient_name", "name_text"], userName, status);
 
   const byName = new Map();
   for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
+    const fieldSet = await getResourceFieldSet(doctype);
+    const fields = supportedFields(fieldSet, SUPPORT_BASE_FIELDS);
     for (const filters of queries) {
+      const supportedFilters = fieldSet ? filters.filter(([field]) => fieldSet.has(field)) : filters;
+      if (supportedFilters.length !== filters.length) continue;
       try {
         const rows = await erpGetList(doctype, {
-          fields: ["*"],
-          filters,
+          fields: fields.length ? fields : ["name", "creation", "modified"],
+          filters: supportedFilters,
           limit,
           offset,
           orderBy: "modified desc",
@@ -330,6 +394,10 @@ router.get("/", async (req, res) => {
       status,
       limit: limitNum,
       offset,
+      userName:
+        req.mobileUser?.full_name ||
+        [req.mobileUser?.first_name, req.mobileUser?.last_name].filter(Boolean).join(" ") ||
+        "",
     });
 
     const tickets = rows.map((row) => mapTicket({ ...row, external_id: row.external_id || userId }));
