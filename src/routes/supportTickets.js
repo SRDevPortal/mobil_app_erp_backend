@@ -484,35 +484,38 @@ async function getMessages(ticketName, { limit = 100, offset = 0 } = {}) {
   return [];
 }
 
-async function countUnreadAgentMessages(ticketName) {
-  const fieldSet = await getMessageFieldSet();
-  if (fieldSet && (!fieldSet.has(MESSAGE_TICKET_FIELD) || !fieldSet.has("sender_type"))) {
-    return 0;
+function countPendingAgentMessages(rows) {
+  let latestUserReplyAt = null;
+  for (const row of rows) {
+    const senderType = (row.sender_type || "").toString().trim().toLowerCase();
+    if (senderType === "agent") continue;
+    const at = new Date(row.timestamp || row.creation || 0).getTime();
+    if (!at) continue;
+    if (latestUserReplyAt == null || at > latestUserReplyAt) latestUserReplyAt = at;
   }
-  try {
-    const rows = await erpGetList(MESSAGE_DOCTYPE, {
-      fields: supportedFields(fieldSet, ["name", "sender_type", "creation", "timestamp"]),
-      filters: [[MESSAGE_TICKET_FIELD, "=", ticketName]],
-      limit: 100,
-      orderBy: "creation asc",
-    });
-    let latestUserReplyAt = null;
+  return rows.filter((row) => {
+    const senderType = (row.sender_type || "").toString().trim().toLowerCase();
+    if (senderType !== "agent") return false;
+    const at = new Date(row.timestamp || row.creation || 0).getTime();
+    return latestUserReplyAt == null || (at && at > latestUserReplyAt);
+  }).length;
+}
+
+async function countUnreadAgentMessages(ticket) {
+  const ids = [
+    ticket.id,
+    ticket.ticket_number,
+  ].map((v) => (v || "").toString().trim()).filter(Boolean);
+  const uniqueIds = [...new Set(ids)];
+  const byName = new Map();
+  for (const id of uniqueIds) {
+    const rows = await getMessages(id, { limit: 100, offset: 0 });
     for (const row of rows) {
-      const senderType = (row.sender_type || "").toString().trim().toLowerCase();
-      if (senderType === "agent") continue;
-      const at = new Date(row.timestamp || row.creation || 0).getTime();
-      if (!at) continue;
-      if (latestUserReplyAt == null || at > latestUserReplyAt) latestUserReplyAt = at;
+      const key = row.name || JSON.stringify(row);
+      byName.set(key, row);
     }
-    return rows.filter((row) => {
-      const senderType = (row.sender_type || "").toString().trim().toLowerCase();
-      if (senderType !== "agent") return false;
-      const at = new Date(row.timestamp || row.creation || 0).getTime();
-      return latestUserReplyAt == null || (at && at > latestUserReplyAt);
-    }).length;
-  } catch (_) {
-    return 0;
   }
+  return countPendingAgentMessages([...byName.values()]);
 }
 
 async function createMessageViaResource(ticketDoc, body) {
@@ -568,7 +571,7 @@ router.get("/", async (req, res) => {
 
     const tickets = await Promise.all(rows.map(async (row) => {
       const ticket = mapTicket({ ...row, external_id: row.external_id || userId });
-      ticket.unread_message_count = await countUnreadAgentMessages(ticket.id);
+      ticket.unread_message_count = await countUnreadAgentMessages(ticket);
       return ticket;
     }));
     return res.json({
