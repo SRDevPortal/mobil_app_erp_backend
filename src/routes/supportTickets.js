@@ -389,19 +389,9 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
 
   const strongQueries = [];
   addQueries(strongQueries, ["external_id", "user_id", "patient_id", "mobile_user_id", "customer_id", "supabase_user_id"], userId, status);
-  addQueries(strongQueries, ["user_id", "mobile_user_id", "patient_id", "customer_id"], userLinkName, status);
-  addQueries(strongQueries, ["email", "user_email", "email_id", "raised_by", "customer_email"], userEmail, status);
-  addQueries(strongQueries, ["phone", "user_phone", "mobile_number", "phone_number", "mobile"], userPhone, status);
 
   for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
     const rows = await findResourceTicketsForQueries(doctype, strongQueries, { limit, offset });
-    if (rows.length > 0) return rows;
-  }
-
-  const nameQueries = [];
-  addQueries(nameQueries, ["customer_name", "requester_name", "user_name", "patient_name", "name_text"], userName, status);
-  for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
-    const rows = await findResourceTicketsForQueries(doctype, nameQueries, { limit, offset });
     if (rows.length > 0) return rows;
   }
 
