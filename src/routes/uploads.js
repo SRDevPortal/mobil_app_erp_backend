@@ -4,7 +4,11 @@ const path = require("path");
 const { erpCallMethod, erpGetDoc, erpUpdate } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
-const { mergeHealthEntriesForToolSync } = require("../services/healthEntryRows");
+const {
+  collectLogsFromExistingRows,
+  mergeHealthEntriesForToolSync,
+  mergeLogsPreferIncoming,
+} = require("../services/healthEntryRows");
 const { uploadPrescriptionToS3 } = require("../services/s3PrescriptionUpload");
 
 const router = express.Router();
@@ -85,13 +89,17 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
         file_type: fileType,
         file_size: req.file?.size,
       };
+      const prescriptionLogs = mergeLogsPreferIncoming(
+        collectLogsFromExistingRows(existing, "prescriptions_data"),
+        [entry],
+      );
       const body = {
         external_id: parentExternalId,
         supabase_user_id: parentExternalId,
         tool_key: "prescriptions_data",
         entry_id: `local_${Date.now()}_prescriptions_data`,
         entry_timestamp: nowIso,
-        data_json: [entry],
+        data_json: prescriptionLogs,
         source: "app",
       };
       const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
