@@ -1,7 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
-const { erpCallMethod, erpGetDoc } = require("../frappeClient");
+const { erpCallMethod, erpGetDoc, erpUpdate } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const { mergeHealthEntriesForToolSync } = require("../services/healthEntryRows");
@@ -83,16 +83,24 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
         source: "upload",
       };
       const next = mergeHealthEntriesForToolSync(existing, body, parentExternalId);
-      const parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
-        method: "POST",
-        appToken: true,
-        body: {
-          external_id: parentExternalId,
-          supabase_user_id: parentExternalId,
+      try {
+        const parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
+          method: "POST",
+          appToken: true,
+          body: {
+            external_id: parentExternalId,
+            supabase_user_id: parentExternalId,
+            health_entries: next,
+          },
+        });
+        erpSaved = unwrapMobileAppV1Message(parsed) || parsed;
+      } catch (e) {
+        if (!userRow?.name) throw e;
+        console.warn("[uploads/prescription] users_full_sync failed, trying Resource API health_entries update:", e.message);
+        erpSaved = await erpUpdate(DOCTYPE.MOBILE_APP_USER, userRow.name, {
           health_entries: next,
-        },
-      });
-      erpSaved = unwrapMobileAppV1Message(parsed) || parsed;
+        });
+      }
     } catch (e) {
       erpWarning = e.message || "Prescription uploaded to S3, but ERP save failed.";
       console.warn("[uploads/prescription] ERP prescription health-entry sync failed:", erpWarning);
