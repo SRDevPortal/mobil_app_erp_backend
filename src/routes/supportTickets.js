@@ -496,7 +496,7 @@ async function resolveTicket(id) {
     const fieldSet = await getResourceFieldSet(doctype);
     try {
       const doc = await erpGetDoc(doctype, normalized);
-      if (doc) return doc;
+      if (doc) return { ...doc, __doctype: doctype };
     } catch (_) {
       /* try ticket_number below */
     }
@@ -510,7 +510,7 @@ async function resolveTicket(id) {
       });
       if (rows[0]?.name) {
         const doc = await erpGetDoc(doctype, rows[0].name);
-        if (doc) return doc;
+        if (doc) return { ...doc, __doctype: doctype };
       }
     } catch (_) {
       /* try next doctype */
@@ -558,6 +558,18 @@ function embeddedMessagesFromTicket(ticketDoc = {}) {
     }
   }
   return rows;
+}
+
+function embeddedMessageField(ticketDoc = {}, fieldSet = null) {
+  for (const field of EMBEDDED_MESSAGE_FIELDS) {
+    const value = ticketDoc[field];
+    const list = Array.isArray(value) ? value : safeJsonParse(value, null);
+    if (Array.isArray(list)) return field;
+  }
+  if (fieldSet) {
+    return EMBEDDED_MESSAGE_FIELDS.find((field) => fieldSet.has(field)) || null;
+  }
+  return null;
 }
 
 async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {}) {
@@ -626,6 +638,49 @@ async function createMessageViaResource(ticketDoc, body) {
     fieldSet,
   );
   return erpCreate(MESSAGE_DOCTYPE, doc);
+}
+
+async function createMessageViaEmbeddedTicket(ticketDoc, body) {
+  const doctype = ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0];
+  if (!doctype || !ticketDoc.name) return null;
+  const fieldSet = await getResourceFieldSet(doctype);
+  const field = embeddedMessageField(ticketDoc, fieldSet);
+  if (!field) return null;
+
+  const existingValue = ticketDoc[field];
+  const existingRows = Array.isArray(existingValue) ? existingValue : safeJsonParse(existingValue, []);
+  const rows = Array.isArray(existingRows) ? [...existingRows] : [];
+  const now = nowFrappeDatetime();
+  const row = {
+    sender_type: "User",
+    sender_id: body.user_id || "",
+    sender_name: body.user_name || "User",
+    message: body.message,
+    timestamp: now,
+    is_read: 0,
+  };
+  rows.push(row);
+  const updated = await erpUpdate(doctype, ticketDoc.name, { [field]: rows });
+  if (updated) {
+    ticketDoc[field] = updated[field] || rows;
+  }
+  return {
+    ...row,
+    name: `${ticketDoc.name}-${field}-${rows.length - 1}`,
+    [MESSAGE_TICKET_FIELD]: ticketDoc.name,
+    ticket: ticketDoc.name,
+    creation: now,
+  };
+}
+
+async function createTicketMessage(ticketDoc, body) {
+  try {
+    const embedded = await createMessageViaEmbeddedTicket(ticketDoc, body);
+    if (embedded) return embedded;
+  } catch (e) {
+    console.warn("[supportTickets] Embedded ticket message append failed, trying message Resource API:", e.message);
+  }
+  return createMessageViaResource(ticketDoc, body);
 }
 
 function isPluginPath(req) {
@@ -763,7 +818,7 @@ router.post("/:id/messages", async (req, res) => {
 
     const ticketDoc = await resolveTicket(req.params.id);
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
-    const saved = await createMessageViaResource(ticketDoc, { ...req.body, message });
+    const saved = await createTicketMessage(ticketDoc, { ...req.body, message });
     return res.status(201).json({ success: true, data: { message: mapMessage(saved || {}) } });
   } catch (e) {
     return res.status(e.status || 500).json({ success: false, message: e.message });
