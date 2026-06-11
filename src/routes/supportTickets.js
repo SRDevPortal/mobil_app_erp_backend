@@ -92,6 +92,19 @@ const MESSAGE_BASE_FIELDS = [
   "creation",
   "modified",
 ];
+const EMBEDDED_MESSAGE_FIELDS = [
+  "messages",
+  "conversation",
+  "conversation_messages",
+  "chat",
+  "chat_messages",
+  "replies",
+  "comments",
+  "support_messages",
+  "ticket_messages",
+  "communication",
+  "communications",
+];
 const SUPPORT_LOOKUP_METHODS = [
   "mobile_app.api.v1.support_tickets_lookup",
   "mobile_app.api.v1.support_tickets_list",
@@ -229,20 +242,61 @@ async function callFirstSupportMethod(methods, options) {
   throw firstError || new Error("No support method configured");
 }
 
+function normalizeSenderType(value, doc = {}) {
+  const raw = (value || doc.sender || doc.from || doc.author_type || doc.user_type || "").toString().trim().toLowerCase();
+  if (
+    raw.includes("agent") ||
+    raw.includes("admin") ||
+    raw.includes("support") ||
+    raw.includes("staff") ||
+    raw.includes("operator") ||
+    raw.includes("manager") ||
+    raw.includes("doctor") ||
+    raw.includes("erp")
+  ) {
+    return "agent";
+  }
+  if (raw.includes("user") || raw.includes("patient") || raw.includes("customer") || raw.includes("requester")) {
+    return "user";
+  }
+
+  const owner = (doc.owner || doc.sender_email || doc.email || "").toString().trim().toLowerCase();
+  const senderName = (doc.sender_name || doc.sender || doc.owner_name || "").toString().trim().toLowerCase();
+  if (
+    owner === "administrator" ||
+    owner.includes("admin") ||
+    owner.includes("support") ||
+    senderName.includes("support") ||
+    senderName.includes("admin")
+  ) {
+    return "agent";
+  }
+
+  return "user";
+}
+
+function getMessageText(doc = {}) {
+  return doc.message || doc.content || doc.text || doc.comment || doc.reply || doc.description || doc.body || "";
+}
+
+function getMessageTime(doc = {}) {
+  return doc.timestamp || doc.creation || doc.created_at || doc.created_on || doc.date || doc.modified;
+}
+
 function mapMessage(doc = {}) {
   const attachments = safeJsonParse(doc.attachments, []);
-  const senderType = (doc.sender_type || "").toString().trim().toLowerCase();
+  const senderType = normalizeSenderType(doc.sender_type, doc);
   return {
-    id: doc.name,
+    id: doc.name || doc.id || "",
     ticket_id: doc[MESSAGE_TICKET_FIELD] || doc.ticket || doc.ticket_id || "",
-    sender_type: senderType === "agent" ? "agent" : "user",
+    sender_type: senderType,
     sender_id: doc.sender_id || null,
     sender_name: doc.sender_name || "",
-    message: doc.message || "",
+    message: getMessageText(doc),
     attachments: Array.isArray(attachments) && attachments.length > 0 ? attachments : doc.attachment ? [doc.attachment] : [],
     is_read: doc.is_read === 1 || doc.is_read === true || doc.is_read === "1",
     read_at: toIso(doc.read_at, null),
-    created_at: toIso(doc.timestamp || doc.creation, new Date().toISOString()),
+    created_at: toIso(getMessageTime(doc), new Date().toISOString()),
     updated_at: toIso(doc.modified, new Date().toISOString()),
   };
 }
@@ -484,38 +538,72 @@ async function getMessages(ticketName, { limit = 100, offset = 0 } = {}) {
   return [];
 }
 
+function embeddedMessagesFromTicket(ticketDoc = {}) {
+  const rows = [];
+  for (const field of EMBEDDED_MESSAGE_FIELDS) {
+    const value = ticketDoc[field];
+    const list = Array.isArray(value) ? value : safeJsonParse(value, []);
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const text = getMessageText(item);
+      if (!text && !item.sender_type && !item.sender && !item.owner) continue;
+      rows.push({
+        ...item,
+        name: item.name || `${ticketDoc.name || ticketDoc.ticket_number || "ticket"}-${field}-${rows.length}`,
+        [MESSAGE_TICKET_FIELD]: item[MESSAGE_TICKET_FIELD] || ticketDoc.name || ticketDoc.ticket_number,
+        ticket: item.ticket || ticketDoc.name || ticketDoc.ticket_number,
+        creation: item.creation || item.created_at || item.timestamp || ticketDoc.creation,
+      });
+    }
+  }
+  return rows;
+}
+
+async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {}) {
+  const ids = [
+    ticketDoc.name,
+    ticketDoc.ticket_number,
+    ticketDoc.id,
+  ].map((v) => (v || "").toString().trim()).filter(Boolean);
+  const byKey = new Map();
+  for (const id of [...new Set(ids)]) {
+    const rows = await getMessages(id, { limit, offset });
+    for (const row of rows) {
+      const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
+      byKey.set(key, row);
+    }
+  }
+  for (const row of embeddedMessagesFromTicket(ticketDoc)) {
+    const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
+    byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((a, b) => {
+    const at = new Date(getMessageTime(a) || 0).getTime() || 0;
+    const bt = new Date(getMessageTime(b) || 0).getTime() || 0;
+    return at - bt;
+  });
+}
+
 function countPendingAgentMessages(rows) {
   let latestUserReplyAt = null;
   for (const row of rows) {
-    const senderType = (row.sender_type || "").toString().trim().toLowerCase();
+    const senderType = normalizeSenderType(row.sender_type, row);
     if (senderType === "agent") continue;
-    const at = new Date(row.timestamp || row.creation || 0).getTime();
+    const at = new Date(getMessageTime(row) || 0).getTime();
     if (!at) continue;
     if (latestUserReplyAt == null || at > latestUserReplyAt) latestUserReplyAt = at;
   }
   return rows.filter((row) => {
-    const senderType = (row.sender_type || "").toString().trim().toLowerCase();
+    const senderType = normalizeSenderType(row.sender_type, row);
     if (senderType !== "agent") return false;
-    const at = new Date(row.timestamp || row.creation || 0).getTime();
+    const at = new Date(getMessageTime(row) || 0).getTime();
     return latestUserReplyAt == null || (at && at > latestUserReplyAt);
   }).length;
 }
 
 async function countUnreadAgentMessages(ticket) {
-  const ids = [
-    ticket.id,
-    ticket.ticket_number,
-  ].map((v) => (v || "").toString().trim()).filter(Boolean);
-  const uniqueIds = [...new Set(ids)];
-  const byName = new Map();
-  for (const id of uniqueIds) {
-    const rows = await getMessages(id, { limit: 100, offset: 0 });
-    for (const row of rows) {
-      const key = row.name || JSON.stringify(row);
-      byName.set(key, row);
-    }
-  }
-  return countPendingAgentMessages([...byName.values()]);
+  return countPendingAgentMessages(await getAllTicketMessages(ticket, { limit: 100, offset: 0 }));
 }
 
 async function createMessageViaResource(ticketDoc, body) {
@@ -571,7 +659,7 @@ router.get("/", async (req, res) => {
 
     const tickets = await Promise.all(rows.map(async (row) => {
       const ticket = mapTicket({ ...row, external_id: row.external_id || userId });
-      ticket.unread_message_count = await countUnreadAgentMessages(ticket);
+      ticket.unread_message_count = await countUnreadAgentMessages({ ...row, ...ticket });
       ticket.has_pending_agent_reply = ticket.unread_message_count > 0;
       return ticket;
     }));
@@ -647,7 +735,7 @@ router.get("/:id", async (req, res) => {
   try {
     const ticketDoc = await resolveTicket(req.params.id);
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
-    const messages = (await getMessages(ticketDoc.name)).map(mapMessage);
+    const messages = (await getAllTicketMessages(ticketDoc)).map(mapMessage);
     return res.json({ success: true, data: { ticket: mapTicket(ticketDoc), messages } });
   } catch (e) {
     return res.status(e.status || 500).json({ success: false, message: e.message });
@@ -660,7 +748,7 @@ router.get("/:id/messages", async (req, res) => {
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const rows = await getMessages(ticketDoc.name, { limit, offset: (page - 1) * limit });
+    const rows = await getAllTicketMessages(ticketDoc, { limit, offset: (page - 1) * limit });
     const messages = rows.map(mapMessage);
     return res.json({ success: true, data: { messages, pagination: { page, limit, total: messages.length } } });
   } catch (e) {
