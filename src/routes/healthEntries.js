@@ -1,5 +1,5 @@
 const express = require("express");
-const { erpCallMethod, erpGetDoc } = require("../frappeClient");
+const { erpCallMethod, erpGetDoc, erpUpdate } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const {
@@ -91,7 +91,8 @@ router.post("/", async (req, res) => {
     const entriesCount = dedupeLogsById(incomingLogs).length;
     const frappeIdentity = frappeHealthEntryIdentity(tool_key);
 
-    let parsed;
+    let parsed;
+    let savedViaResourceApi = false;
     try {
       parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
         method: "POST",
@@ -107,15 +108,62 @@ router.post("/", async (req, res) => {
           health_entries: next,
         }),
       });
-    } catch (e) {
-      const status = e.status >= 400 && e.status < 600 ? e.status : 502;
-      return res.status(status).json({
-        success: false,
-        message: e.message || "users_full_sync failed",
-        frappePath: e.frappePath,
-        detail: e.payload,
-        tool_key,
-      });
+    } catch (e) {
+
+      if (userRow?.name) {
+
+        try {
+
+          const saved = await erpUpdate(DOCTYPE.MOBILE_APP_USER, userRow.name, {
+
+            health_entries: next,
+
+          });
+
+          parsed = { data: saved };
+
+          savedViaResourceApi = true;
+
+        } catch (fallbackError) {
+
+          const status = fallbackError.status >= 400 && fallbackError.status < 600 ? fallbackError.status : 502;
+
+          return res.status(status).json({
+
+            success: false,
+
+            message: fallbackError.message || e.message || "health_entries Resource API fallback failed",
+
+            frappePath: fallbackError.frappePath || e.frappePath,
+
+            detail: fallbackError.payload || e.payload,
+
+            tool_key,
+
+          });
+
+        }
+
+      } else {
+
+        const status = e.status >= 400 && e.status < 600 ? e.status : 502;
+
+        return res.status(status).json({
+
+          success: false,
+
+          message: e.message || "users_full_sync failed",
+
+          frappePath: e.frappePath,
+
+          detail: e.payload,
+
+          tool_key,
+
+        });
+
+      }
+
     }
 
     const data = unwrapMobileAppV1Message(parsed);
@@ -126,7 +174,9 @@ router.post("/", async (req, res) => {
           ...data,
           tool_key,
           health_entry_external_id: frappeIdentity.health_entry_external_id,
-          entries_count: entriesCount,
+          entries_count: entriesCount,
+
+          saved_via_resource_api: savedViaResourceApi,
         },
       });
     }
