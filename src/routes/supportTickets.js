@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
-const { erpCallMethod } = require("../frappeClient");
+const { erpCallMethod, erpGetList } = require("../frappeClient");
+const { DOCTYPE } = require("../config");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, pickExternalId } = require("../normalize");
 
@@ -17,6 +18,10 @@ router.use((req, _res, next) => {
 router.use(resolveUserMiddleware);
 
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
+const SUPPORT_RESOURCE_DOCTYPES = [
+  process.env.ERP_TICKET_DOCTYPE || "Support Ticket",
+  DOCTYPE.MOBILE_APP_SUPPORT_TICKET,
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
 const SUPPORT_LOOKUP_METHODS = [
   "mobile_app.api.v1.support_tickets_lookup",
   "mobile_app.api.v1.support_tickets_list",
@@ -187,13 +192,14 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
         offset,
       },
     });
-    return ticketRowsFromMethodData(data)
+    const rows = ticketRowsFromMethodData(data)
       .sort((a, b) => {
         const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
         const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
         return bt - at;
       })
       .slice(0, limit);
+    if (rows.length > 0) return rows;
   } catch (e) {
     console.warn("[supportTickets] mobile_app support lookup failed, trying users_lookup engagement fallback:", e.message);
   }
@@ -227,6 +233,44 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, status,
   } catch (e) {
     console.warn("[supportTickets] users_lookup engagement fallback failed:", e.message);
   }
+
+  const queries = [];
+  addQueries(queries, ["external_id", "user_id", "patient_id", "mobile_user_id"], userId, status);
+  addQueries(queries, ["user_id", "mobile_user_id"], userLinkName, status);
+  addQueries(queries, ["email", "user_email", "customer_email"], userEmail, status);
+  addQueries(queries, ["phone", "user_phone", "mobile_number"], userPhone, status);
+
+  const byName = new Map();
+  for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
+    for (const filters of queries) {
+      try {
+        const rows = await erpGetList(doctype, {
+          fields: ["*"],
+          filters,
+          limit,
+          offset,
+          orderBy: "modified desc",
+        });
+        for (const row of rows) {
+          const key = row.name || row.ticket_number || JSON.stringify(row);
+          byName.set(`${doctype}:${key}`, row);
+        }
+      } catch (e) {
+        if (e.status !== 403 && e.status !== 404) {
+          console.warn(`[supportTickets] Resource API lookup failed for ${doctype}:`, e.message);
+        }
+      }
+    }
+  }
+
+  const resourceRows = [...byName.values()]
+    .sort((a, b) => {
+      const at = new Date(a.modified || a.updated_at || a.creation || a.created_at || 0).getTime() || 0;
+      const bt = new Date(b.modified || b.updated_at || b.creation || b.created_at || 0).getTime() || 0;
+      return bt - at;
+    })
+    .slice(0, limit);
+  if (resourceRows.length > 0) return resourceRows;
 
   return [];
 }
@@ -288,7 +332,7 @@ router.get("/", async (req, res) => {
       offset,
     });
 
-    const tickets = rows.map(mapTicket);
+    const tickets = rows.map((row) => mapTicket({ ...row, external_id: row.external_id || userId }));
     return res.json({
       success: true,
       data: {
