@@ -1,6 +1,11 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
+const crypto = require("crypto");
+const { DOCTYPE } = require("../config");
+const { erpCreate } = require("../frappeClient");
+const { mapPrescriptionToFrappe } = require("../normalize");
+const { findMobileAppUser } = require("../services/userService");
 const { uploadPrescriptionToS3 } = require("../services/s3PrescriptionUpload");
 
 const router = express.Router();
@@ -23,10 +28,46 @@ router.post("/prescription", prescriptionUpload.single("file"), async (req, res)
   try {
     const rawUserId = req.query?.userId || req.query?.user_id || req.body?.userId || req.body?.user_id;
     const uploaded = await uploadPrescriptionToS3({ file: req.file, userId: rawUserId });
+    let erpSaved = null;
+    let erpWarning = null;
+    try {
+      const userId = rawUserId != null ? String(rawUserId).trim() : "";
+      const userRow = userId
+        ? await findMobileAppUser(
+          { external_id: userId, supabase_user_id: userId, customer_id: userId },
+          {},
+          {},
+        )
+        : null;
+      const prescriptionExternalId =
+        req.body?.external_id ||
+        req.body?.prescription_id ||
+        req.query?.external_id ||
+        crypto.randomUUID();
+      const doc = mapPrescriptionToFrappe(
+        {
+          external_id: prescriptionExternalId,
+          file_name: req.file?.originalname || uploaded.key,
+          file_type: req.file?.mimetype || path.extname(req.file?.originalname || uploaded.key).replace(/^\./, ""),
+          file_size: req.file?.size,
+          file_url: uploaded.url,
+          notes: req.body?.notes,
+          uploaded_at: req.body?.uploaded_at,
+        },
+        userRow?.name || userId,
+      );
+      erpSaved = await erpCreate(DOCTYPE.MOBILE_APP_PRESCRIPTION, doc);
+    } catch (e) {
+      erpWarning = e.message || "Prescription uploaded to S3, but ERP save failed.";
+      console.warn("[uploads/prescription] ERP prescription save failed:", erpWarning);
+    }
     return res.status(201).json({
       success: true,
       url: uploaded.url,
       key: uploaded.key,
+      erp_persisted: Boolean(erpSaved),
+      ...(erpSaved ? { erp_data: erpSaved } : {}),
+      ...(erpWarning ? { erp_warning: erpWarning } : {}),
     });
   } catch (err) {
     if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
