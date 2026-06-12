@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const express = require("express");
 const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
-const { resolveUserMiddleware } = require("../services/userService");
+const { findMobileAppUser, resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, nowFrappeDatetime, pickExternalId } = require("../normalize");
 
 const router = express.Router();
@@ -25,7 +25,7 @@ router.use((req, _res, next) => {
 
 function supportRouteNeedsUser(req) {
   if (req.path === "/" && (req.method === "GET" || req.method === "POST")) return true;
-  if (req.method === "POST" && ["/get_support_tickets", "/send_support_reply", "/mark_support_ticket_read"].includes(req.path || "")) {
+  if (req.method === "POST" && ["/send_support_reply", "/mark_support_ticket_read"].includes(req.path || "")) {
     return Boolean(req.body?.mobile_app_user || req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
   }
   if (req.method === "POST" && /\/messages$/.test(req.path || "")) {
@@ -1264,9 +1264,30 @@ router.post("/get_support_tickets", async (req, res) => {
       console.warn("[supportTickets] Current get_support_tickets method failed; using fallback:", methodError.message);
     }
 
+    let userLinkName = body.mobile_app_user_name || req.userLinkName || "";
+    if (!userLinkName) {
+      try {
+        const user = await findMobileAppUser(
+          {
+            external_id: userId,
+            user_id: userId,
+            customer_id: userId,
+            supabase_user_id: userId,
+            email: body.user_email || body.email || "",
+            phone: body.user_phone || body.phone || "",
+          },
+          {},
+          {},
+        );
+        userLinkName = user?.name || "";
+      } catch (userError) {
+        console.warn("[supportTickets] Optional Mobile App User lookup failed for ticket list:", userError.message);
+      }
+    }
+
     const rows = await findTickets({
       userId,
-      userLinkName: body.mobile_app_user_name || "",
+      userLinkName,
       userEmail: body.user_email || body.email || "",
       userPhone: body.user_phone || body.phone || "",
       status: body.status || req.query?.status,
