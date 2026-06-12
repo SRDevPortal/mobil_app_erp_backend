@@ -160,6 +160,11 @@ const SUPPORT_SYNC_METHODS = [
   "mobile_app.api.v1.create_support_ticket",
   "mobile_app.api.v1.support.create_ticket",
 ];
+const CURRENT_SUPPORT_METHODS = {
+  getTickets: "mobile_app.api.support_ticket.get_support_tickets",
+  sendReply: "mobile_app.api.support_ticket.send_support_reply",
+  markRead: "mobile_app.api.support_ticket.mark_support_ticket_read",
+};
 
 function toApiStatus(value) {
   const normalized = (value || "").toString().trim().toLowerCase().replace(/\s+/g, "_");
@@ -344,7 +349,11 @@ function mapCurrentContractMessage(doc = {}) {
 
 async function mapCurrentContractTicket(doc = {}, { userId } = {}) {
   const mapped = mapTicket({ ...doc, external_id: doc.external_id || userId });
-  const rawMessages = await getAllTicketMessages({ ...doc, ...mapped });
+  const embeddedMessages = Array.isArray(doc.messages) ? doc.messages : [];
+  const rawMessages =
+    embeddedMessages.length > 0
+      ? embeddedMessages
+      : await getAllTicketMessages({ ...doc, ...mapped });
   const messages = rawMessages.map(mapCurrentContractMessage);
   return {
     name: doc.name || mapped.id || "",
@@ -362,6 +371,41 @@ async function mapCurrentContractTicket(doc = {}, { userId } = {}) {
     mobile_app_user: doc.mobile_app_user || mapped.user_id || userId || "",
     messages,
   };
+}
+
+function currentTicketsFromMethodData(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.tickets)) return data.tickets;
+  if (Array.isArray(data?.data?.tickets)) return data.data.tickets;
+  return [];
+}
+
+function currentMethodPayload(parsed) {
+  if (parsed?.message && typeof parsed.message === "object") return parsed.message;
+  if (parsed?.data && typeof parsed.data === "object") return parsed.data;
+  return parsed || {};
+}
+
+function currentTicketFromMethodData(data) {
+  if (data?.ticket && typeof data.ticket === "object") return data.ticket;
+  if (data?.data?.ticket && typeof data.data.ticket === "object") return data.data.ticket;
+  return null;
+}
+
+function currentMessageFromMethodData(data) {
+  if (data?.message && typeof data.message === "object" && !Array.isArray(data.message)) return data.message;
+  if (data?.data?.message && typeof data.data.message === "object") return data.data.message;
+  return null;
+}
+
+function shouldFallbackFromCurrentMethod(e) {
+  const message = (e?.message || "").toString();
+  return (
+    e?.status === 404 ||
+    message.includes("has no attribute") ||
+    message.includes("Failed to get method") ||
+    message.includes("Unknown method")
+  );
 }
 
 async function getMessageFieldSet() {
@@ -1198,6 +1242,26 @@ router.post("/get_support_tickets", async (req, res) => {
       return res.status(400).json({ success: false, message: "mobile_app_user is required" });
     }
 
+    try {
+      const parsed = await erpCallMethod(CURRENT_SUPPORT_METHODS.getTickets, {
+        method: "POST",
+        appToken: true,
+        body: { mobile_app_user: userId },
+      });
+      const data = currentMethodPayload(parsed);
+      const methodTickets = currentTicketsFromMethodData(data);
+      if (methodTickets.length > 0) {
+        const tickets = await Promise.all(methodTickets.map((row) => mapCurrentContractTicket(row, { userId })));
+        return res.json({ success: true, message: { tickets } });
+      }
+      if (data && Array.isArray(data.tickets)) {
+        return res.json({ success: true, message: { tickets: [] } });
+      }
+    } catch (methodError) {
+      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
+      console.warn("[supportTickets] Current get_support_tickets method unavailable; using fallback:", methodError.message);
+    }
+
     const rows = await findTickets({
       userId,
       userLinkName: body.mobile_app_user_name || "",
@@ -1225,6 +1289,33 @@ router.post("/send_support_reply", async (req, res) => {
     if (!userId) return res.status(400).json({ success: false, message: "mobile_app_user is required" });
     if (!ticketName) return res.status(400).json({ success: false, message: "ticket_name is required" });
     if (!message) return res.status(400).json({ success: false, message: "message is required" });
+
+    try {
+      const parsed = await erpCallMethod(CURRENT_SUPPORT_METHODS.sendReply, {
+        method: "POST",
+        appToken: true,
+        body: {
+          mobile_app_user: userId,
+          ticket_name: ticketName,
+          message,
+        },
+      });
+      const data = currentMethodPayload(parsed);
+      const methodTicket = currentTicketFromMethodData(data);
+      const methodTickets = currentTicketsFromMethodData(data);
+      const methodMessage = currentMessageFromMethodData(data);
+      return res.status(201).json({
+        success: true,
+        message: {
+          ticket: methodTicket ? await mapCurrentContractTicket(methodTicket, { userId }) : null,
+          tickets: await Promise.all(methodTickets.map((row) => mapCurrentContractTicket(row, { userId }))),
+          message: methodMessage ? mapCurrentContractMessage(methodMessage) : null,
+        },
+      });
+    } catch (methodError) {
+      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
+      console.warn("[supportTickets] Current send_support_reply method unavailable; using fallback:", methodError.message);
+    }
 
     const ticketDoc = await resolveTicket(ticketName);
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
@@ -1266,6 +1357,22 @@ router.post("/mark_support_ticket_read", async (req, res) => {
     const body = req.body || {};
     const ticketName = (body.ticket_name || "").toString().trim();
     if (!ticketName) return res.status(400).json({ success: false, message: "ticket_name is required" });
+
+    const userId = (body.mobile_app_user || body.user_id || "").toString().trim();
+    try {
+      await erpCallMethod(CURRENT_SUPPORT_METHODS.markRead, {
+        method: "POST",
+        appToken: true,
+        body: {
+          mobile_app_user: userId,
+          ticket_name: ticketName,
+        },
+      });
+      return res.json({ success: true, message: "Messages marked as read" });
+    } catch (methodError) {
+      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
+      console.warn("[supportTickets] Current mark_support_ticket_read method unavailable; using fallback:", methodError.message);
+    }
 
     const ticketDoc = await resolveTicket(ticketName);
     if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
