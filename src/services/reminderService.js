@@ -42,8 +42,8 @@ async function runAppointmentReminders(options = {}) {
   const now = options.now ? new Date(options.now) : new Date();
   const beforeMinutes = Number(options.reminderBeforeMinutes || REMINDER_BEFORE_MINUTES);
   const lookaheadMinutes = Number(options.lookaheadMinutes || REMINDER_LOOKAHEAD_MINUTES);
-  const dueStart = new Date(now.getTime() + beforeMinutes * 60 * 1000);
-  const dueEnd = new Date(dueStart.getTime() + lookaheadMinutes * 60 * 1000);
+  const dueStart = new Date(now.getTime() - lookaheadMinutes * 60 * 1000);
+  const dueEnd = now;
   const appointments = await readAppointments();
   const results = [];
   let checked = 0;
@@ -54,7 +54,9 @@ async function runAppointmentReminders(options = {}) {
     if (status === "cancelled" || status === "canceled" || status === "completed") continue;
     if (clean(appointment.reminderSentAt)) continue;
     const scheduledAt = parseAppointmentDateTime(appointment.appointmentDate, appointment.appointmentTime);
-    if (!scheduledAt || scheduledAt < dueStart || scheduledAt > dueEnd) continue;
+    if (!scheduledAt) continue;
+    const reminderAt = new Date(scheduledAt.getTime() - beforeMinutes * 60 * 1000);
+    if (reminderAt < dueStart || reminderAt > dueEnd) continue;
     const input = { ...appointment, event: "appointment_reminder" };
     const built = buildAppointmentPush(input);
     const result = await sendAppointmentPush(input);
@@ -70,7 +72,12 @@ async function runAppointmentReminders(options = {}) {
       });
       await markReminderSent(appointment.bookingId);
     }
-    results.push({ bookingId: appointment.bookingId, appointmentAt: scheduledAt.toISOString(), result });
+    results.push({
+      bookingId: appointment.bookingId,
+      appointmentAt: scheduledAt.toISOString(),
+      reminderAt: reminderAt.toISOString(),
+      result,
+    });
   }
   return { checked, dueEnd: dueEnd.toISOString(), dueStart: dueStart.toISOString(), results, sent };
 }
