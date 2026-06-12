@@ -1255,7 +1255,7 @@ router.post("/get_support_tickets", async (req, res) => {
         return res.json({ success: true, message: { tickets } });
       }
       if (data && Array.isArray(data.tickets)) {
-        return res.json({ success: true, message: { tickets: [] } });
+        console.warn("[supportTickets] Current get_support_tickets returned no tickets; using fallback lookup.");
       }
     } catch (methodError) {
       if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
