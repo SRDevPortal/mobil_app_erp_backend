@@ -1258,8 +1258,7 @@ router.post("/get_support_tickets", async (req, res) => {
         console.warn("[supportTickets] Current get_support_tickets returned no tickets; using fallback lookup.");
       }
     } catch (methodError) {
-      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
-      console.warn("[supportTickets] Current get_support_tickets method unavailable; using fallback:", methodError.message);
+      console.warn("[supportTickets] Current get_support_tickets method failed; using fallback:", methodError.message);
     }
 
     const rows = await findTickets({
