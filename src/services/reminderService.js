@@ -3,8 +3,8 @@ const {
   REMINDER_BEFORE_MINUTES,
   REMINDER_LOOKAHEAD_MINUTES,
 } = require("../config");
-const { markReminderSent, readAppointments } = require("./notificationStore");
-const { sendAppointmentPush } = require("./pushService");
+const { markReminderSent, readAppointments, saveNotification } = require("./notificationStore");
+const { buildAppointmentPush, sendAppointmentPush } = require("./pushService");
 
 function clean(value) {
   return value == null ? "" : String(value).trim();
@@ -55,9 +55,19 @@ async function runAppointmentReminders(options = {}) {
     if (clean(appointment.reminderSentAt)) continue;
     const scheduledAt = parseAppointmentDateTime(appointment.appointmentDate, appointment.appointmentTime);
     if (!scheduledAt || scheduledAt < dueStart || scheduledAt > dueEnd) continue;
-    const result = await sendAppointmentPush({ ...appointment, event: "appointment_reminder" });
+    const input = { ...appointment, event: "appointment_reminder" };
+    const built = buildAppointmentPush(input);
+    const result = await sendAppointmentPush(input);
     if (result.sent) {
       sent += 1;
+      await saveNotification({
+        appointment,
+        event: built.event,
+        title: built.title,
+        body: built.body,
+        data: built.data,
+        push: result,
+      });
       await markReminderSent(appointment.bookingId);
     }
     results.push({ bookingId: appointment.bookingId, appointmentAt: scheduledAt.toISOString(), result });

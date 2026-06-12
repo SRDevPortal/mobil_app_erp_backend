@@ -31,6 +31,7 @@ const reportsRouter = require("./routes/reports");
 const uploadsRouter = require("./routes/uploads");
 const webhookEventsRouter = require("./routes/webhookEvents");
 const authRouter = require("./routes/auth");
+const { startReminderScheduler } = require("./services/reminderScheduler");
 
 function createApp() {
   const app = express();
@@ -97,6 +98,7 @@ function listen() {
   app.listen(PORT, () => {
     console.log(`backend-erp listening on http://localhost:${PORT}`);
     console.log(`health: http://localhost:${PORT}/api/health`);
+    startReminderScheduler();
   });
 }
 

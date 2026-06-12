@@ -30,6 +30,10 @@ npm run dev
 | `ERP_BASE_URL` | Frappe site root, e.g. `https://your-site.com` |
 | `ERP_TOKEN` | `api_key:api_secret` when `ERP_AUTH_SCHEME=token`, or bearer token |
 | `ERP_AUTH_SCHEME` | `token` (default) or `bearer` |
+| `REMINDER_BEFORE_MINUTES` | Appointment reminder lead time, default `120` |
+| `REMINDER_LOOKAHEAD_MINUTES` | Reminder due window per poll, default `15` |
+| `REMINDER_POLL_INTERVAL_MS` | Backend reminder scheduler interval, default `60000` |
+| `REMINDER_SCHEDULER_DISABLED` | Set `true` to disable automatic appointment reminder polling |
 | `DOCTYPE_*` | Override Frappe DocType titles if needed |
 
 ## Routes (aligned with filds.md + Frappe fields)
