@@ -472,6 +472,12 @@ function mapAppointmentChildRowForFullSync(body = {}, parentUserExternalId) {
     scheduled_at: body.scheduled_at,
     is_removed_by_user: body.is_removed_by_user,
     updated_at: body.updated_at,
+    payment_provider: body.payment_provider ?? body.paymentProvider,
+    payment_status: body.payment_status ?? body.paymentStatus,
+    razorpay_order_id: body.razorpay_order_id ?? body.razorpayOrderId,
+    razorpay_payment_id: body.razorpay_payment_id ?? body.razorpayPaymentId,
+    paid_amount: body.paid_amount ?? body.paidAmount,
+    payable_at_clinic: body.payable_at_clinic ?? body.payableAtClinic,
     appointment_datetime_legacy: pickAppointmentDatetime(body),
   });
   const payload_json =

@@ -31,6 +31,7 @@ const reportsRouter = require("./routes/reports");
 const uploadsRouter = require("./routes/uploads");
 const webhookEventsRouter = require("./routes/webhookEvents");
 const authRouter = require("./routes/auth");
+const paymentsRouter = require("./routes/payments");
 const { startReminderScheduler } = require("./services/reminderScheduler");
 
 function createApp() {
@@ -82,6 +83,7 @@ function createApp() {
   app.use("/api/v1/reports", reportsRouter);
   app.use("/api/v1/support-tickets", supportTicketsRouter);
   app.use("/api/v1/support/tickets", supportTicketsRouter);
+  app.use("/api/v1/payments", paymentsRouter);
   app.use("/api/upload", requireAppToken, uploadsRouter);
   app.use("/api/v1/webhook-events", webhookEventsRouter);
 
