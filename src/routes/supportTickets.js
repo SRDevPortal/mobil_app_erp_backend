@@ -16,8 +16,8 @@ router.use((req, _res, next) => {
 });
 
 router.use((req, _res, next) => {
-  const queryUserId = req.query?.user_id || req.query?.patient_id;
-  const bodyUserId = req.body?.user_id || req.body?.patient_id;
+  const queryUserId = req.query?.user_id || req.query?.patient_id || req.query?.mobile_app_user;
+  const bodyUserId = req.body?.user_id || req.body?.patient_id || req.body?.mobile_app_user;
   if (queryUserId && !req.query.external_id) req.query.external_id = queryUserId;
   if ((bodyUserId || queryUserId) && req.body && !req.body.external_id) req.body.external_id = bodyUserId || queryUserId;
   next();
@@ -25,6 +25,9 @@ router.use((req, _res, next) => {
 
 function supportRouteNeedsUser(req) {
   if (req.path === "/" && (req.method === "GET" || req.method === "POST")) return true;
+  if (req.method === "POST" && ["/get_support_tickets", "/send_support_reply", "/mark_support_ticket_read"].includes(req.path || "")) {
+    return Boolean(req.body?.mobile_app_user || req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
+  }
   if (req.method === "POST" && /\/messages$/.test(req.path || "")) {
     return Boolean(req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
   }
