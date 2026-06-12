@@ -586,6 +586,7 @@ function mapSupportTicketToFrappe(body = {}, userLinkName) {
   const doc = {
     external_id: pickExternalId(body) || undefined,
     user_id: userLinkName,
+    mobile_app_user: userLinkName,
     requester_name: body.requester_name ?? body.name,
     email: body.email,
     phone: pickPhone(body) || body.phone,

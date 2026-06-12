@@ -31,7 +31,7 @@ function optionalSupportUserMiddleware(req, res, next) {
 router.use(optionalSupportUserMiddleware);
 
 const MESSAGE_TICKET_FIELD = (process.env.ERP_MESSAGE_TICKET_FIELD || "ticket").trim();
-const MESSAGE_DOCTYPE = (process.env.ERP_MESSAGE_DOCTYPE || "Support Ticket Message").trim();
+const MESSAGE_DOCTYPE = (process.env.ERP_MESSAGE_DOCTYPE || "App Support Ticket Message").trim();
 const MESSAGE_DOCTYPE_CANDIDATES = [
   MESSAGE_DOCTYPE,
   "App Support Ticket Message",
@@ -43,6 +43,7 @@ const MESSAGE_DOCTYPE_CANDIDATES = [
 const MESSAGE_TICKET_FIELD_CANDIDATES = [
   MESSAGE_TICKET_FIELD,
   "ticket",
+  "mobile_app_ticket",
   "support_ticket",
   "app_support_ticket",
   "ticket_id",
@@ -53,13 +54,14 @@ const SUPPORT_RESOURCE_DOCTYPES = [
   process.env.ERP_TICKET_DOCTYPE,
   DOCTYPE.MOBILE_APP_SUPPORT_TICKET,
   "Support Ticket",
-].filter((v, i, arr) => v && arr.indexOf(v) === i);
+].filter((v, i, arr) => v && v !== "Mobile App Support Ticket" && arr.indexOf(v) === i);
 const RESOURCE_FIELD_CACHE = new Map();
 const RESOURCE_META_CACHE = new Map();
-const MESSAGE_RESOURCE_CACHE = { value: null, schemaChecked: false };
+const MESSAGE_RESOURCE_CACHE = { values: new Map(), schemaChecked: false };
 const SUPPORT_BASE_FIELDS = [
   "name",
   "ticket_number",
+  "mobile_app_user",
   "customer_name",
   "requester_name",
   "user_name",
@@ -195,7 +197,7 @@ function mapTicket(doc = {}) {
   return {
     id: doc.name || doc.id || doc.ticket_number || doc.record_external_id,
     ticket_number: doc.ticket_number || doc.name || doc.id || doc.record_external_id,
-    user_id: doc.external_id || doc.user_id || doc.patient_id || doc.mobile_user_id || null,
+    user_id: doc.external_id || doc.user_id || doc.patient_id || doc.mobile_user_id || doc.mobile_app_user || null,
     user_name: doc.requester_name || doc.user_name || doc.customer_name || doc.patient_name || doc.name_text || "",
     user_email: doc.email || doc.user_email || doc.email_id || doc.raised_by || "",
     user_phone: doc.phone || doc.user_phone || doc.mobile_number || "",
@@ -330,7 +332,7 @@ function clearResourceCaches(doctype) {
   RESOURCE_FIELD_CACHE.delete(doctype);
   RESOURCE_META_CACHE.delete(doctype);
   if (doctype === MESSAGE_DOCTYPE) {
-    MESSAGE_RESOURCE_CACHE.value = null;
+    MESSAGE_RESOURCE_CACHE.values.clear();
   }
 }
 
@@ -383,6 +385,7 @@ function ensureMessageDocTypeShape(meta) {
 async function ensureSupportMessageSchema() {
   if (MESSAGE_RESOURCE_CACHE.schemaChecked) return;
   MESSAGE_RESOURCE_CACHE.schemaChecked = true;
+  if (MESSAGE_DOCTYPE !== "App Support Ticket Message") return;
 
   try {
     const meta = await erpGetDoc("DocType", MESSAGE_DOCTYPE);
@@ -432,7 +435,7 @@ function messageFieldFromMeta(meta, ticketDoctype) {
 
 async function getMessageResource(ticketDoctype = "App Support Ticket") {
   await ensureSupportMessageSchema();
-  const cached = MESSAGE_RESOURCE_CACHE.value;
+  const cached = MESSAGE_RESOURCE_CACHE.values.get(ticketDoctype);
   if (cached) return cached;
   for (const doctype of MESSAGE_DOCTYPE_CANDIDATES) {
     const meta = await getResourceMeta(doctype);
@@ -444,7 +447,7 @@ async function getMessageResource(ticketDoctype = "App Support Ticket") {
       continue;
     }
     const resource = { doctype, meta, fieldSet, ticketField };
-    MESSAGE_RESOURCE_CACHE.value = resource;
+    MESSAGE_RESOURCE_CACHE.values.set(ticketDoctype, resource);
     console.log(`[supportTickets] Using message DocType ${doctype} with ticket field ${ticketField}`);
     return resource;
   }
@@ -581,6 +584,7 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
         supabase_user_id: userId,
         user_id: userId,
         mobile_user_id: userLinkName,
+        mobile_app_user: userLinkName,
         email: userEmail,
         phone: userPhone,
         mobile: userPhone,
@@ -603,6 +607,7 @@ async function findTickets({ userId, userLinkName, userEmail, userPhone, userNam
 
   const strongQueries = [];
   addQueries(strongQueries, ["external_id", "user_id", "patient_id", "mobile_user_id", "customer_id", "supabase_user_id"], userId, status);
+  addQueries(strongQueries, ["mobile_app_user"], userLinkName, status);
 
   for (const doctype of SUPPORT_RESOURCE_DOCTYPES) {
     const rows = await findResourceTicketsForQueries(doctype, strongQueries, { limit, offset });
@@ -626,6 +631,7 @@ async function createTicketViaResource(body, { externalId, userLinkName }) {
       supabase_user_id: externalId,
       patient_id: externalId,
       mobile_user_id: userLinkName,
+      mobile_app_user: userLinkName,
       user_id: externalId || userLinkName,
       customer_name: requesterName,
       requester_name: requesterName,
@@ -642,7 +648,7 @@ async function createTicketViaResource(body, { externalId, userLinkName }) {
       status: toFrappeStatus(body.status || "open"),
       priority: toFrappePriority(body.priority),
       category: body.category || null,
-      metadata: JSON.stringify({ source: "mobile_app", user_link_name: userLinkName || null }),
+      metadata: JSON.stringify({ source: "mobile_app", user_link_name: userLinkName || null, mobile_app_user: userLinkName || null }),
     },
     fieldSet,
   );
@@ -679,8 +685,8 @@ async function resolveTicket(id) {
   return null;
 }
 
-async function getMessages(ticketName, { limit = 100, offset = 0 } = {}) {
-  const resource = await getMessageResource();
+async function getMessages(ticketName, { limit = 100, offset = 0, ticketDoctype = "App Support Ticket" } = {}) {
+  const resource = await getMessageResource(ticketDoctype);
   const fieldSet = resource?.fieldSet || null;
   const ticketField = resource?.ticketField || MESSAGE_TICKET_FIELD;
   const doctype = resource?.doctype || MESSAGE_DOCTYPE;
@@ -809,6 +815,7 @@ function embeddedMessageField(ticketDoc = {}, fieldSet = null, meta = null) {
 }
 
 async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {}) {
+  const ticketDoctype = ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0];
   const ids = [
     ticketDoc.name,
     ticketDoc.ticket_number,
@@ -816,7 +823,7 @@ async function getAllTicketMessages(ticketDoc, { limit = 100, offset = 0 } = {})
   ].map((v) => (v || "").toString().trim()).filter(Boolean);
   const byKey = new Map();
   for (const id of [...new Set(ids)]) {
-    const rows = await getMessages(id, { limit, offset });
+    const rows = await getMessages(id, { limit, offset, ticketDoctype });
     for (const row of rows) {
       const key = row.name || `${getMessageTime(row) || ""}:${getMessageText(row)}`;
       byKey.set(key, row);

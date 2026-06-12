@@ -17,6 +17,7 @@ async function erpFetch(path, { method = "GET", body, query } = {}) {
     method,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...erpAuthHeader(),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -108,6 +109,7 @@ async function erpCallMethod(methodDottedPath, { method = "GET", query = {}, bod
 
   const headers = {
     "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
     ...(appToken ? { "X-ERP-Token": MOBILE_APP_ERP_TOKEN } : erpAuthHeader()),
   };
 
