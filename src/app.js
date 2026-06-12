@@ -79,6 +79,8 @@ function createApp() {
   app.use("/api/v1", appointmentNotificationsRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/reports", reportsRouter);
+  app.use("/api/method", requireAppToken, supportTicketsRouter);
+  app.use("/api/method/mobile_app.api.support_ticket", requireAppToken, supportTicketsRouter);
   app.use("/api/v1/support-tickets", supportTicketsRouter);
   app.use("/api/v1/support/tickets", supportTicketsRouter);
   app.use("/api/upload", requireAppToken, uploadsRouter);
