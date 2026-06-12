@@ -2,22 +2,14 @@ const crypto = require("crypto");
 const express = require("express");
 const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { DOCTYPE } = require("../config");
-const { findMobileAppUser, resolveUserMiddleware } = require("../services/userService");
+const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, nowFrappeDatetime, pickExternalId } = require("../normalize");
 
 const router = express.Router();
 
 router.use((req, _res, next) => {
-  const match = (req.path || "").match(
-    /^\/mobile_app\.api\.support_ticket\.(get_support_tickets|send_support_reply|mark_support_ticket_read)$/,
-  );
-  if (match) req.url = `/${match[1]}`;
-  next();
-});
-
-router.use((req, _res, next) => {
-  const queryUserId = req.query?.user_id || req.query?.patient_id || req.query?.mobile_app_user;
-  const bodyUserId = req.body?.user_id || req.body?.patient_id || req.body?.mobile_app_user;
+  const queryUserId = req.query?.user_id || req.query?.patient_id;
+  const bodyUserId = req.body?.user_id || req.body?.patient_id;
   if (queryUserId && !req.query.external_id) req.query.external_id = queryUserId;
   if ((bodyUserId || queryUserId) && req.body && !req.body.external_id) req.body.external_id = bodyUserId || queryUserId;
   next();
@@ -25,9 +17,6 @@ router.use((req, _res, next) => {
 
 function supportRouteNeedsUser(req) {
   if (req.path === "/" && (req.method === "GET" || req.method === "POST")) return true;
-  if (req.method === "POST" && ["/send_support_reply", "/mark_support_ticket_read"].includes(req.path || "")) {
-    return Boolean(req.body?.mobile_app_user || req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
-  }
   if (req.method === "POST" && /\/messages$/.test(req.path || "")) {
     return Boolean(req.body?.user_id || req.body?.patient_id || req.body?.external_id || req.body?.customer_id);
   }
@@ -163,11 +152,6 @@ const SUPPORT_SYNC_METHODS = [
   "mobile_app.api.v1.create_support_ticket",
   "mobile_app.api.v1.support.create_ticket",
 ];
-const CURRENT_SUPPORT_METHODS = {
-  getTickets: "mobile_app.api.support_ticket.get_support_tickets",
-  sendReply: "mobile_app.api.support_ticket.send_support_reply",
-  markRead: "mobile_app.api.support_ticket.mark_support_ticket_read",
-};
 
 function toApiStatus(value) {
   const normalized = (value || "").toString().trim().toLowerCase().replace(/\s+/g, "_");
@@ -335,80 +319,6 @@ function mapMessage(doc = {}) {
     created_at: toIso(getMessageTime(doc), new Date().toISOString()),
     updated_at: toIso(doc.modified, new Date().toISOString()),
   };
-}
-
-function mapCurrentContractMessage(doc = {}) {
-  const mapped = mapMessage(doc);
-  return {
-    id: mapped.id,
-    from: mapped.sender_type === "agent" ? "agent" : "customer",
-    sender_id: mapped.sender_id || "",
-    sender_name: mapped.sender_name || "",
-    body: mapped.message || "",
-    timestamp: mapped.created_at,
-    is_read: mapped.is_read,
-  };
-}
-
-async function mapCurrentContractTicket(doc = {}, { userId } = {}) {
-  const mapped = mapTicket({ ...doc, external_id: doc.external_id || userId });
-  const embeddedMessages = Array.isArray(doc.messages) ? doc.messages : [];
-  const rawMessages =
-    embeddedMessages.length > 0
-      ? embeddedMessages
-      : await getAllTicketMessages({ ...doc, ...mapped });
-  const messages = rawMessages.map(mapCurrentContractMessage);
-  return {
-    name: doc.name || mapped.id || "",
-    external_id: doc.external_id || mapped.ticket_number || mapped.id || "",
-    subject: mapped.subject,
-    description: mapped.description,
-    status: mapped.status,
-    priority: mapped.priority,
-    recorded_at: mapped.created_at,
-    preview: messages.length > 0 ? messages[messages.length - 1].body : mapped.description,
-    label: mapped.category || null,
-    category: mapped.category || null,
-    unread_count: countPendingAgentMessages(rawMessages),
-    profile_image_url: doc.profile_image_url || doc.user_image || null,
-    mobile_app_user: doc.mobile_app_user || mapped.user_id || userId || "",
-    messages,
-  };
-}
-
-function currentTicketsFromMethodData(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.tickets)) return data.tickets;
-  if (Array.isArray(data?.data?.tickets)) return data.data.tickets;
-  return [];
-}
-
-function currentMethodPayload(parsed) {
-  if (parsed?.message && typeof parsed.message === "object") return parsed.message;
-  if (parsed?.data && typeof parsed.data === "object") return parsed.data;
-  return parsed || {};
-}
-
-function currentTicketFromMethodData(data) {
-  if (data?.ticket && typeof data.ticket === "object") return data.ticket;
-  if (data?.data?.ticket && typeof data.data.ticket === "object") return data.data.ticket;
-  return null;
-}
-
-function currentMessageFromMethodData(data) {
-  if (data?.message && typeof data.message === "object" && !Array.isArray(data.message)) return data.message;
-  if (data?.data?.message && typeof data.data.message === "object") return data.data.message;
-  return null;
-}
-
-function shouldFallbackFromCurrentMethod(e) {
-  const message = (e?.message || "").toString();
-  return (
-    e?.status === 404 ||
-    message.includes("has no attribute") ||
-    message.includes("Failed to get method") ||
-    message.includes("Unknown method")
-  );
 }
 
 async function getMessageFieldSet() {
@@ -1233,194 +1143,6 @@ router.post("/", async (req, res) => {
     return res.status(201).json({ success: true, data: saved });
   } catch (e) {
     const out = supportErrorResponse(e, "Support ticket conversation could not be loaded.");
-    return res.status(out.status).json(out.body);
-  }
-});
-
-router.post("/get_support_tickets", async (req, res) => {
-  try {
-    const body = req.body || {};
-    const userId = (body.mobile_app_user || body.user_id || req.query?.mobile_app_user || "").toString().trim();
-    if (!userId) {
-      return res.status(400).json({ success: false, message: "mobile_app_user is required" });
-    }
-
-    try {
-      const parsed = await erpCallMethod(CURRENT_SUPPORT_METHODS.getTickets, {
-        method: "POST",
-        appToken: true,
-        body: { mobile_app_user: userId },
-      });
-      const data = currentMethodPayload(parsed);
-      const methodTickets = currentTicketsFromMethodData(data);
-      if (methodTickets.length > 0) {
-        const tickets = await Promise.all(methodTickets.map((row) => mapCurrentContractTicket(row, { userId })));
-        return res.json({ success: true, message: { tickets } });
-      }
-      if (data && Array.isArray(data.tickets)) {
-        console.warn("[supportTickets] Current get_support_tickets returned no tickets; using fallback lookup.");
-      }
-    } catch (methodError) {
-      console.warn("[supportTickets] Current get_support_tickets method failed; using fallback:", methodError.message);
-    }
-
-    let userLinkName = body.mobile_app_user_name || req.userLinkName || "";
-    if (!userLinkName) {
-      try {
-        const user = await findMobileAppUser(
-          {
-            external_id: userId,
-            user_id: userId,
-            customer_id: userId,
-            supabase_user_id: userId,
-            email: body.user_email || body.email || "",
-            phone: body.user_phone || body.phone || "",
-          },
-          {},
-          {},
-        );
-        userLinkName = user?.name || "";
-      } catch (userError) {
-        console.warn("[supportTickets] Optional Mobile App User lookup failed for ticket list:", userError.message);
-      }
-    }
-
-    const rows = await findTickets({
-      userId,
-      userLinkName,
-      userEmail: body.user_email || body.email || "",
-      userPhone: body.user_phone || body.phone || "",
-      status: body.status || req.query?.status,
-      limit: 100,
-      offset: 0,
-      userName: body.user_name || "",
-    });
-    const tickets = await Promise.all(rows.map((row) => mapCurrentContractTicket(row, { userId })));
-    return res.json({ success: true, message: { tickets } });
-  } catch (e) {
-    const out = supportErrorResponse(e, "Support tickets could not be loaded.");
-    return res.status(out.status).json(out.body);
-  }
-});
-
-router.post("/send_support_reply", async (req, res) => {
-  try {
-    const body = req.body || {};
-    const userId = (body.mobile_app_user || body.user_id || "").toString().trim();
-    const ticketName = (body.ticket_name || "").toString().trim();
-    const message = (body.message || "").toString().trim();
-    if (!userId) return res.status(400).json({ success: false, message: "mobile_app_user is required" });
-    if (!ticketName) return res.status(400).json({ success: false, message: "ticket_name is required" });
-    if (!message) return res.status(400).json({ success: false, message: "message is required" });
-
-    try {
-      const parsed = await erpCallMethod(CURRENT_SUPPORT_METHODS.sendReply, {
-        method: "POST",
-        appToken: true,
-        body: {
-          mobile_app_user: userId,
-          ticket_name: ticketName,
-          message,
-        },
-      });
-      const data = currentMethodPayload(parsed);
-      const methodTicket = currentTicketFromMethodData(data);
-      const methodTickets = currentTicketsFromMethodData(data);
-      const methodMessage = currentMessageFromMethodData(data);
-      return res.status(201).json({
-        success: true,
-        message: {
-          ticket: methodTicket ? await mapCurrentContractTicket(methodTicket, { userId }) : null,
-          tickets: await Promise.all(methodTickets.map((row) => mapCurrentContractTicket(row, { userId }))),
-          message: methodMessage ? mapCurrentContractMessage(methodMessage) : null,
-        },
-      });
-    } catch (methodError) {
-      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
-      console.warn("[supportTickets] Current send_support_reply method unavailable; using fallback:", methodError.message);
-    }
-
-    const ticketDoc = await resolveTicket(ticketName);
-    if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
-    const saved = await createTicketMessage(ticketDoc, {
-      user_id: userId,
-      user_name: body.user_name || "User",
-      message,
-      attachments: Array.isArray(body.attachments) ? body.attachments : [],
-    });
-
-    const updatedTicketDoc = await resolveTicket(ticketName) || ticketDoc;
-    const ticket = await mapCurrentContractTicket(updatedTicketDoc, { userId });
-    const rows = await findTickets({
-      userId,
-      userLinkName: body.mobile_app_user_name || "",
-      userEmail: body.user_email || body.email || "",
-      userPhone: body.user_phone || body.phone || "",
-      limit: 100,
-      offset: 0,
-      userName: body.user_name || "",
-    });
-    const tickets = await Promise.all(rows.map((row) => mapCurrentContractTicket(row, { userId })));
-    return res.status(201).json({
-      success: true,
-      message: {
-        ticket,
-        tickets,
-        message: mapCurrentContractMessage(saved || {}),
-      },
-    });
-  } catch (e) {
-    const out = supportErrorResponse(e, "Support reply could not be sent.");
-    return res.status(out.status).json(out.body);
-  }
-});
-
-router.post("/mark_support_ticket_read", async (req, res) => {
-  try {
-    const body = req.body || {};
-    const ticketName = (body.ticket_name || "").toString().trim();
-    if (!ticketName) return res.status(400).json({ success: false, message: "ticket_name is required" });
-
-    const userId = (body.mobile_app_user || body.user_id || "").toString().trim();
-    try {
-      await erpCallMethod(CURRENT_SUPPORT_METHODS.markRead, {
-        method: "POST",
-        appToken: true,
-        body: {
-          mobile_app_user: userId,
-          ticket_name: ticketName,
-        },
-      });
-      return res.json({ success: true, message: "Messages marked as read" });
-    } catch (methodError) {
-      if (!shouldFallbackFromCurrentMethod(methodError)) throw methodError;
-      console.warn("[supportTickets] Current mark_support_ticket_read method unavailable; using fallback:", methodError.message);
-    }
-
-    const ticketDoc = await resolveTicket(ticketName);
-    if (!ticketDoc) return res.status(404).json({ success: false, message: "Ticket not found" });
-    const resource = await getMessageResource(ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0]);
-    const fieldSet = resource?.fieldSet || null;
-    const ticketField = resource?.ticketField || MESSAGE_TICKET_FIELD;
-    if (!resource || (fieldSet && !fieldSet.has(ticketField))) {
-      return res.json({ success: true, message: "Messages marked as read" });
-    }
-
-    const rows = await erpGetList(resource.doctype, {
-      fields: ["name"],
-      filters: [[ticketField, "=", ticketDoc.name]],
-      limit: 100,
-      orderBy: "creation desc",
-    });
-    const targets = rows.map((row) => row.name).filter(Boolean);
-    await Promise.all(targets.map((name) => erpUpdate(resource.doctype, name, {
-      is_read: 1,
-      read_at: nowFrappeDatetime(),
-    })));
-    return res.json({ success: true, message: "Messages marked as read" });
-  } catch (e) {
-    if (e.status === 404) return res.json({ success: true, message: "Messages marked as read" });
-    const out = supportErrorResponse(e, "Messages could not be marked as read.");
     return res.status(out.status).json(out.body);
   }
 });
