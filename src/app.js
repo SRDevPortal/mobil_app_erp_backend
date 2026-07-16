@@ -34,6 +34,14 @@ const authRouter = require("./routes/auth");
 const paymentsRouter = require("./routes/payments");
 const { startReminderScheduler } = require("./services/reminderScheduler");
 
+function safeHost(value) {
+  try {
+    return value ? new URL(value).host : "";
+  } catch (_e) {
+    return "";
+  }
+}
+
 function createApp() {
   const app = express();
   app.use(cors());
@@ -48,6 +56,7 @@ function createApp() {
       service: "sriaas-backend-erp",
       frappe: {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
+        erpBaseHost: safeHost(ERP_BASE_URL),
         /** Node → Frappe (`Authorization: token client_id:client_secret`) */
         erpTokenConfigured: Boolean(ERP_TOKEN),
         erpAuthScheme: ERP_AUTH_SCHEME,
