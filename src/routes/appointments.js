@@ -48,6 +48,7 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
     },
     userName,
   );
+  doc.appointment_external_id = appointmentExternalId;
 
   const bookingId = body.booking_id != null ? String(body.booking_id).trim() : "";
   if (bookingId) {
