@@ -65,6 +65,12 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
   }
 
   try {
+    return await erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, appointmentExternalId, doc);
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+
+  try {
     const byExternalId = await erpGetList(DOCTYPE.MOBILE_APP_APPOINTMENT, {
       filters: [["external_id", "=", appointmentExternalId]],
       fields: ["name"],
@@ -83,7 +89,13 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
     }
   }
 
-  return erpCreate(DOCTYPE.MOBILE_APP_APPOINTMENT, doc);
+  try {
+    return await erpCreate(DOCTYPE.MOBILE_APP_APPOINTMENT, doc);
+  } catch (e) {
+    const duplicate = e.status === 409 || String(e.message || "").includes("DuplicateEntryError");
+    if (!duplicate) throw e;
+    return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, appointmentExternalId, doc);
+  }
 }
 
 async function readAllMobileAppUsers() {
