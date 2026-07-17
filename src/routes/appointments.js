@@ -49,15 +49,6 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
     userName,
   );
 
-  const byExternalId = await erpGetList(DOCTYPE.MOBILE_APP_APPOINTMENT, {
-    filters: [["external_id", "=", appointmentExternalId]],
-    fields: ["name"],
-    limit: 1,
-  });
-  if (byExternalId[0]?.name) {
-    return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byExternalId[0].name, doc);
-  }
-
   const bookingId = body.booking_id != null ? String(body.booking_id).trim() : "";
   if (bookingId) {
     const byBookingId = await erpGetList(DOCTYPE.MOBILE_APP_APPOINTMENT, {
@@ -67,6 +58,21 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
     });
     if (byBookingId[0]?.name) {
       return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byBookingId[0].name, doc);
+    }
+  }
+
+  try {
+    const byExternalId = await erpGetList(DOCTYPE.MOBILE_APP_APPOINTMENT, {
+      filters: [["external_id", "=", appointmentExternalId]],
+      fields: ["name"],
+      limit: 1,
+    });
+    if (byExternalId[0]?.name) {
+      return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byExternalId[0].name, doc);
+    }
+  } catch (e) {
+    if (!String(e.message || "").includes("Field not permitted in query: external_id")) {
+      throw e;
     }
   }
 
