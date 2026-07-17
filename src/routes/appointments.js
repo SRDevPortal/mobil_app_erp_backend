@@ -37,10 +37,14 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
     booking_id: newRow.booking_id || body.booking_id,
     patient_name: newRow.patient_name || body.patient_name,
     mobile_number: newRow.mobile_number || pickPhone(body) || body.patient_phone,
+    patient_phone: newRow.mobile_number || pickPhone(body) || body.patient_phone,
     email: newRow.email || body.email || body.patient_email,
+    patient_email: newRow.email || body.email || body.patient_email,
     consultation_type: newRow.consultation_type || body.consultation_type || body.appointment_type,
+    appointment_type: newRow.consultation_type || body.consultation_type || body.appointment_type,
     appointment_for: newRow.appointment_for || body.appointment_for,
     page_url_disease: newRow.page_url_disease || body.page_url,
+    page_url: newRow.page_url_disease || body.page_url,
     status: newRow.status || body.status || "pending",
   });
 
