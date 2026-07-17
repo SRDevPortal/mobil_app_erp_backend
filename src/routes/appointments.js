@@ -56,7 +56,11 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
       limit: 1,
     });
     if (byBookingId[0]?.name) {
-      return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byBookingId[0].name, doc);
+      try {
+        return await erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byBookingId[0].name, doc);
+      } catch (e) {
+        if (e.status !== 404) throw e;
+      }
     }
   }
 
@@ -67,7 +71,11 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
       limit: 1,
     });
     if (byExternalId[0]?.name) {
-      return erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byExternalId[0].name, doc);
+      try {
+        return await erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, byExternalId[0].name, doc);
+      } catch (e) {
+        if (e.status !== 404) throw e;
+      }
     }
   } catch (e) {
     if (!String(e.message || "").includes("Field not permitted in query: external_id")) {
