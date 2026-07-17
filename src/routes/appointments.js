@@ -73,6 +73,111 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
   return erpCreate(DOCTYPE.MOBILE_APP_APPOINTMENT, doc);
 }
 
+async function readAllMobileAppUsers() {
+  const users = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const page = await erpGetList(DOCTYPE.MOBILE_APP_USER, {
+      fields: ["name", "external_id"],
+      limit,
+      offset,
+      orderBy: "modified asc",
+    });
+    users.push(...page);
+    if (page.length < limit) break;
+    offset += limit;
+  }
+  return users;
+}
+
+async function backfillStandaloneAppointments({ userName } = {}) {
+  const users = userName
+    ? [{ name: userName }]
+    : await readAllMobileAppUsers();
+  const result = {
+    users_scanned: users.length,
+    appointment_rows_found: 0,
+    standalone_upserted: 0,
+    skipped: 0,
+    errors: [],
+  };
+
+  for (const user of users) {
+    try {
+      const doc = await erpGetDoc(DOCTYPE.MOBILE_APP_USER, user.name);
+      const rows = Array.isArray(doc?.appointments) ? doc.appointments : [];
+      result.appointment_rows_found += rows.length;
+
+      for (const row of rows) {
+        try {
+          const appointmentExternalId =
+            row.appointment_external_id != null && String(row.appointment_external_id).trim() !== ""
+              ? String(row.appointment_external_id).trim()
+              : row.booking_id != null && String(row.booking_id).trim() !== ""
+                ? `appt_${String(row.booking_id).trim()}`
+                : "";
+          if (!appointmentExternalId) {
+            result.skipped += 1;
+            continue;
+          }
+
+          await upsertStandaloneAppointment(
+            {
+              ...row,
+              external_id: appointmentExternalId,
+              patient_email: row.email,
+              patient_phone: row.mobile_number,
+              appointment_type: row.consultation_type,
+              page_url: row.page_url_disease,
+            },
+            doc.name,
+            { ...row, appointment_external_id: appointmentExternalId },
+          );
+          result.standalone_upserted += 1;
+        } catch (rowError) {
+          result.errors.push({
+            user: doc.name,
+            booking_id: row.booking_id,
+            appointment_external_id: row.appointment_external_id,
+            message: rowError.message,
+            frappePath: rowError.frappePath,
+          });
+        }
+      }
+    } catch (userError) {
+      result.errors.push({
+        user: user.name,
+        message: userError.message,
+        frappePath: userError.frappePath,
+      });
+    }
+  }
+
+  return result;
+}
+
+router.post("/backfill", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userName =
+      body.user_name != null && String(body.user_name).trim() !== ""
+        ? String(body.user_name).trim()
+        : body.mobile_app_user != null && String(body.mobile_app_user).trim() !== ""
+          ? String(body.mobile_app_user).trim()
+          : undefined;
+    const result = await backfillStandaloneAppointments({ userName });
+    return res.json({ success: true, data: result });
+  } catch (e) {
+    return res.status(e.status || 500).json({
+      success: false,
+      message: e.message,
+      frappePath: e.frappePath,
+      detail: e.payload,
+    });
+  }
+});
+
 /**
  * Create or update one appointment row on **Mobile App User** → **`appointments`** child table
  * and mirror it to standalone **Mobile App Appointment** for list/report views.
