@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { DOCTYPE } = require("../config");
-const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
+const { erpCreate, erpDelete, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const { mapAppointmentChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
 
@@ -27,22 +27,22 @@ async function saveAppointmentsViaResourceApi(userName, next) {
   return saved || { name: userName, appointments: next };
 }
 
+async function replaceStandaloneAppointment(name, doc) {
+  try {
+    await erpDelete(DOCTYPE.MOBILE_APP_APPOINTMENT, name);
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+  return erpCreate(DOCTYPE.MOBILE_APP_APPOINTMENT, doc);
+}
+
 async function updateStandaloneAppointment(name, doc) {
   try {
     return await erpUpdate(DOCTYPE.MOBILE_APP_APPOINTMENT, name, doc);
   } catch (e) {
-    if (e.status !== 404) throw e;
+    if (e.status === 404) return replaceStandaloneAppointment(name, doc);
+    throw e;
   }
-
-  const parsed = await erpCallMethod("frappe.client.set_value", {
-    method: "POST",
-    body: {
-      doctype: DOCTYPE.MOBILE_APP_APPOINTMENT,
-      name,
-      fieldname: doc,
-    },
-  });
-  return parsed?.message || parsed;
 }
 
 async function upsertStandaloneAppointment(body, userName, newRow) {
@@ -104,7 +104,7 @@ async function upsertStandaloneAppointment(body, userName, newRow) {
   } catch (e) {
     const duplicate = e.status === 409 || String(e.message || "").includes("DuplicateEntryError");
     if (!duplicate) throw e;
-    return updateStandaloneAppointment(appointmentExternalId, doc);
+    return replaceStandaloneAppointment(appointmentExternalId, doc);
   }
 }
 

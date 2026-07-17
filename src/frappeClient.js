@@ -82,6 +82,13 @@ async function erpUpdate(doctype, name, doc) {
   return payload?.data || null;
 }
 
+async function erpDelete(doctype, name) {
+  const payload = await erpFetch(`/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  return payload?.data || payload?.message || true;
+}
+
 async function erpGetDoc(doctype, name) {
   const payload = await erpFetch(`/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`);
   return payload?.data || null;
@@ -150,6 +157,7 @@ module.exports = {
   erpGetList,
   erpCreate,
   erpUpdate,
+  erpDelete,
   erpGetDoc,
   erpCallMethod,
 };
