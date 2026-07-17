@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { DOCTYPE } = require("../config");
-const { erpCallMethod, erpGetDoc } = require("../frappeClient");
+const { erpCallMethod, erpGetDoc, erpUpdate } = require("../frappeClient");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const { mapAppointmentChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
 
@@ -13,6 +13,18 @@ function stripRootUndefined(obj) {
     if (v !== undefined) out[k] = v;
   }
   return out;
+}
+
+async function saveAppointmentsViaResourceApi(userName, next) {
+  if (!userName) {
+    const err = new Error("Mobile App User not found for appointment sync fallback");
+    err.status = 404;
+    throw err;
+  }
+  const saved = await erpUpdate(DOCTYPE.MOBILE_APP_USER, userName, {
+    appointments: next,
+  });
+  return saved || { name: userName, appointments: next };
 }
 
 /**
@@ -64,6 +76,7 @@ router.post("/", async (req, res) => {
     next.push(newRow);
 
     let parsed;
+    let savedViaResourceApi = false;
     try {
       parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
         method: "POST",
@@ -78,18 +91,46 @@ router.post("/", async (req, res) => {
         }),
       });
     } catch (e) {
-      const status = e.status >= 400 && e.status < 600 ? e.status : 502;
-      return res.status(status).json({
-        success: false,
-        message: e.message || "users_full_sync failed",
-        frappePath: e.frappePath,
-        detail: e.payload,
-      });
+      try {
+        parsed = {
+          message: {
+            success: true,
+            data: await saveAppointmentsViaResourceApi(userRow?.name || parentExternalId, next),
+          },
+        };
+        savedViaResourceApi = true;
+      } catch (fallbackError) {
+        const status = fallbackError.status >= 400 && fallbackError.status < 600 ? fallbackError.status : 502;
+        return res.status(status).json({
+          success: false,
+          message: fallbackError.message || e.message || "appointment Resource API fallback failed",
+          frappePath: fallbackError.frappePath || e.frappePath,
+          detail: fallbackError.payload || e.payload,
+        });
+      }
     }
 
     const data = unwrapMobileAppV1Message(parsed);
     if (data && typeof data === "object") {
-      return res.status(201).json({ success: true, data });
+      return res.status(201).json({ success: true, data: { ...data, saved_via_resource_api: savedViaResourceApi } });
+    }
+
+    if (!savedViaResourceApi) {
+      try {
+        const saved = await saveAppointmentsViaResourceApi(userRow?.name || parentExternalId, next);
+        return res.status(201).json({ success: true, data: { ...saved, saved_via_resource_api: true } });
+      } catch (fallbackError) {
+        const status = fallbackError.status >= 400 && fallbackError.status < 600 ? fallbackError.status : 502;
+        return res.status(status).json({
+          success: false,
+          message:
+            fallbackError.message ||
+            "Frappe returned 200 but users_full_sync payload could not be parsed; appointment fallback failed.",
+          frappePath: fallbackError.frappePath,
+          detail: fallbackError.payload,
+          raw: parsed,
+        });
+      }
     }
 
     return res.status(502).json({
