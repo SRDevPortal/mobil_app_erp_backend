@@ -1,6 +1,7 @@
 const express = require("express");
-const { erpCallMethod } = require("../frappeClient");
-const { unwrapMobileAppV1Message } = require("../services/userService");
+const { DOCTYPE } = require("../config");
+const { erpCallMethod, erpUpdate } = require("../frappeClient");
+const { findMobileAppUser, unwrapMobileAppV1Message } = require("../services/userService");
 const {
   pickExternalId,
   pickPhone,
@@ -15,6 +16,31 @@ function stripRootUndefined(obj) {
     if (v !== undefined) out[k] = v;
   }
   return out;
+}
+
+async function saveProfilesViaResourceApi(body, profiles) {
+  const userRow = await findMobileAppUser(body, {}, {});
+  const userName = userRow?.name || pickExternalId(body);
+  if (!userName) {
+    const err = new Error("Mobile App User not found for profile sync fallback");
+    err.status = 404;
+    throw err;
+  }
+
+  const rootUpdate = stripRootUndefined({
+    email: body.email != null ? String(body.email).trim() : undefined,
+    phone: pickPhone(body) || undefined,
+    full_name:
+      body.full_name != null
+        ? String(body.full_name).trim()
+        : body.name != null
+          ? String(body.name).trim()
+          : undefined,
+    profiles,
+  });
+
+  const saved = await erpUpdate(DOCTYPE.MOBILE_APP_USER, userName, rootUpdate);
+  return saved || { name: userName, profiles };
 }
 
 /**
@@ -40,6 +66,7 @@ router.post("/sync", async (req, res) => {
     const profiles = buildProfilesPayloadForFullSync(body);
 
     let parsed;
+    let savedViaResourceApi = false;
     try {
       parsed = await erpCallMethod("mobile_app.api.v1.users_full_sync", {
         method: "POST",
@@ -54,18 +81,46 @@ router.post("/sync", async (req, res) => {
         }),
       });
     } catch (e) {
-      const status = e.status >= 400 && e.status < 600 ? e.status : 502;
-      return res.status(status).json({
-        success: false,
-        message: e.message || "users_full_sync failed",
-        frappePath: e.frappePath,
-        detail: e.payload,
-      });
+      try {
+        parsed = {
+          message: {
+            success: true,
+            data: await saveProfilesViaResourceApi(body, profiles),
+          },
+        };
+        savedViaResourceApi = true;
+      } catch (fallbackError) {
+        const status = fallbackError.status >= 400 && fallbackError.status < 600 ? fallbackError.status : 502;
+        return res.status(status).json({
+          success: false,
+          message: fallbackError.message || e.message || "profile Resource API fallback failed",
+          frappePath: fallbackError.frappePath || e.frappePath,
+          detail: fallbackError.payload || e.payload,
+        });
+      }
     }
 
     const data = unwrapMobileAppV1Message(parsed);
     if (data && typeof data === "object") {
-      return res.json({ success: true, data });
+      return res.json({ success: true, data: { ...data, saved_via_resource_api: savedViaResourceApi } });
+    }
+
+    if (!savedViaResourceApi) {
+      try {
+        const saved = await saveProfilesViaResourceApi(body, profiles);
+        return res.json({ success: true, data: { ...saved, saved_via_resource_api: true } });
+      } catch (fallbackError) {
+        const status = fallbackError.status >= 400 && fallbackError.status < 600 ? fallbackError.status : 502;
+        return res.status(status).json({
+          success: false,
+          message:
+            fallbackError.message ||
+            "Frappe returned 200 but users_full_sync payload could not be parsed; profile fallback failed.",
+          frappePath: fallbackError.frappePath,
+          detail: fallbackError.payload,
+          raw: parsed,
+        });
+      }
     }
 
     return res.status(502).json({
