@@ -3,12 +3,7 @@ const crypto = require("crypto");
 const { DOCTYPE } = require("../config");
 const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
-const {
-  mapAppointmentChildRowForFullSync,
-  mapAppointmentToFrappe,
-  pickExternalId,
-  pickPhone,
-} = require("../normalize");
+const { mapAppointmentChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
 
 const router = express.Router();
 
@@ -34,21 +29,20 @@ async function saveAppointmentsViaResourceApi(userName, next) {
 
 async function upsertStandaloneAppointment(body, userName, newRow) {
   const appointmentExternalId = newRow.appointment_external_id || crypto.randomUUID();
-  const doc = mapAppointmentToFrappe(
-    {
-      ...body,
-      external_id: appointmentExternalId,
-      patient_email: body.patient_email || body.email || newRow.email,
-      patient_phone: body.patient_phone || pickPhone(body) || newRow.mobile_number,
-      appointment_type: body.appointment_type || body.consultation_type || newRow.consultation_type,
-      appointment_date: body.appointment_date || newRow.appointment_date,
-      appointment_time: body.appointment_time || newRow.appointment_time,
-      page_url: body.page_url || newRow.page_url_disease,
-      status: body.status || newRow.status,
-    },
-    userName,
-  );
-  doc.appointment_external_id = appointmentExternalId;
+  const doc = stripRootUndefined({
+    ...newRow,
+    external_id: appointmentExternalId,
+    appointment_external_id: appointmentExternalId,
+    user_id: userName || newRow.user_id,
+    booking_id: newRow.booking_id || body.booking_id,
+    patient_name: newRow.patient_name || body.patient_name,
+    mobile_number: newRow.mobile_number || pickPhone(body) || body.patient_phone,
+    email: newRow.email || body.email || body.patient_email,
+    consultation_type: newRow.consultation_type || body.consultation_type || body.appointment_type,
+    appointment_for: newRow.appointment_for || body.appointment_for,
+    page_url_disease: newRow.page_url_disease || body.page_url,
+    status: newRow.status || body.status || "pending",
+  });
 
   const bookingId = body.booking_id != null ? String(body.booking_id).trim() : "";
   if (bookingId) {
