@@ -332,49 +332,85 @@ async function getUserContextForApi(query = {}) {
   if (!enrichedUser?.name) return null;
   const userLinkName = enrichedUser.name;
 
-  const profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
-    filters: [["user_id", "=", userLinkName]],
-    fields: [
-      "name",
-      "profile_name",
-      "phone",
-      "gender",
-      "age",
-      "height",
-      "weight",
-      "email",
-      "profile_data_json",
-      "modified",
-    ],
-    limit: 1,
-    orderBy: "modified desc",
-  });
-
-  let diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
-    filters: [
-      ["user_id", "=", userLinkName],
-      ["is_active", "=", 1],
-    ],
-    fields: ["name", "disease_name", "disease_id", "modified"],
-    limit: 1,
-    orderBy: "modified desc",
-  });
-  if (!diseases.length) {
-    diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
-      filters: [["user_id", "=", userLinkName]],
-      fields: ["name", "disease_name", "disease_id", "modified"],
-      limit: 1,
-      orderBy: "modified desc",
-    });
+  let profiles = Array.isArray(enrichedUser.profiles) ? enrichedUser.profiles : [];
+  if (!profiles.length) {
+    try {
+      profiles = await erpGetList(DOCTYPE.MOBILE_APP_USER_PROFILE, {
+        filters: [["user_id", "=", userLinkName]],
+        fields: [
+          "name",
+          "profile_name",
+          "phone",
+          "gender",
+          "age",
+          "height",
+          "weight",
+          "email",
+          "profile_data_json",
+          "modified",
+        ],
+        limit: 1,
+        orderBy: "modified desc",
+      });
+    } catch (e) {
+      console.warn("[userService] Mobile App User Profile list skipped:", e.message);
+      profiles = [];
+    }
   }
+
+  const embeddedMedical = Array.isArray(enrichedUser.medical_items) ? enrichedUser.medical_items : [];
+  let disease_selection = pickDiseaseFromV1Medical(embeddedMedical);
+  if (!disease_selection) {
+    let diseases = [];
+    try {
+      diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+        filters: [
+          ["user_id", "=", userLinkName],
+          ["is_active", "=", 1],
+        ],
+        fields: ["name", "disease_name", "disease_id", "modified"],
+        limit: 1,
+        orderBy: "modified desc",
+      });
+    } catch (e) {
+      console.warn("[userService] active disease selection list skipped:", e.message);
+    }
+    if (!diseases.length) {
+      try {
+        diseases = await erpGetList(DOCTYPE.MOBILE_APP_USER_DISEASE_SELECTION, {
+          filters: [["user_id", "=", userLinkName]],
+          fields: ["name", "disease_name", "disease_id", "modified"],
+          limit: 1,
+          orderBy: "modified desc",
+        });
+      } catch (e) {
+        console.warn("[userService] disease selection list skipped:", e.message);
+      }
+    }
+    disease_selection = diseases[0] || null;
+  }
+
+  const medical_items = embeddedMedical.length
+    ? embeddedMedical
+    : disease_selection
+      ? [
+          {
+            name: disease_selection.name,
+            title: disease_selection.disease_name,
+            disease_name: disease_selection.disease_name,
+            record_external_id: disease_selection.disease_id,
+            record_type: "Disease Selection",
+          },
+        ]
+      : [];
 
   return {
     user: attachCustomerIdentity(enrichedUser, enrichedUser.external_id),
     profile: profiles[0] || null,
     profiles,
-    disease_selection: diseases[0] || null,
+    disease_selection,
     sessions: Array.isArray(enrichedUser.sessions) ? enrichedUser.sessions : [],
-    medical_items: Array.isArray(enrichedUser.medical_items) ? enrichedUser.medical_items : [],
+    medical_items,
     appointments: Array.isArray(enrichedUser.appointments) ? enrichedUser.appointments : [],
     health_entries: Array.isArray(enrichedUser.health_entries) ? enrichedUser.health_entries : [],
     engagement_items: Array.isArray(enrichedUser.engagement_items) ? enrichedUser.engagement_items : [],
