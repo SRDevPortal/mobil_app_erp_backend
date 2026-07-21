@@ -102,14 +102,14 @@ function fileContentPart({ fileUrl, fileName, fileBuffer, mimeType }) {
         type: "input_file",
         filename: fileName || "report.pdf",
         file_data: dataUrlFromBuffer(fileBuffer, "application/pdf"),
-        detail: "low",
+        detail: "high",
       };
     }
     const imageMime = mime.startsWith("image/") ? mime : "image/jpeg";
     return {
       type: "input_image",
       image_url: dataUrlFromBuffer(fileBuffer, imageMime),
-      detail: "low",
+      detail: "high",
     };
   }
   if (lower.includes(".pdf") || lower.includes("application/pdf")) {
@@ -123,6 +123,8 @@ function buildPrompt(reportType, expectedFields) {
   return [
     "Extract only the requested lab values visible in the attached report.",
     "Do not invent missing values. Return no row for a missing value.",
+    "Never return UNKNOWN, N/A, null, blank, or placeholder text as a value.",
+    "For KFT reports, common aliases include Serum Creatinine/Creatinine, Blood Urea/Urea, and Uric Acid/Serum Uric Acid.",
     "Use exact requested keys. Keep value numeric/text only; put unit separately.",
     "Status must be NORMAL, LOW, HIGH, BORDERLINE, ABNORMAL, CRITICAL, or UNKNOWN.",
     "Score is 0-100 where 100 is best/normal.",
@@ -139,12 +141,18 @@ function normalizeStatus(raw) {
   return value;
 }
 
+function isMissingExtractedValue(value) {
+  const text = (value == null ? "" : String(value)).trim().toLowerCase();
+  if (!text) return true;
+  return ["unknown", "n/a", "na", "null", "none", "-", "--", "not found", "not visible", "missing"].includes(text);
+}
+
 function normalizeExtractionResult(raw, reportType, expectedFields) {
   const expectedByKey = new Map(expectedFields.map(([key, label]) => [key, label]));
   const fields = [];
   for (const row of Array.isArray(raw?.fields) ? raw.fields : []) {
     const key = (row.key || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    if (!key || row.value == null || row.value.toString().trim() === "") continue;
+    if (!key || isMissingExtractedValue(row.value)) continue;
     fields.push({
       key,
       label: (expectedByKey.get(key) || row.label || key).toString(),
