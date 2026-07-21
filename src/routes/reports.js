@@ -31,34 +31,41 @@ router.post("/extract", requireReportsToken, upload.single("file"), async (req, 
   const reportType = normalizeReportType(req.body?.report_type);
   let fileUrl = (req.body?.file_url || "").toString().trim();
   let fileName = (req.body?.file_name || req.file?.originalname || "").toString().trim();
-  if (!fileUrl) {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "file_url or multipart file is required",
-        report_type: reportType,
-        fields: [],
-        issues: ["file_url or multipart file is required"],
-        parameters: [],
-      });
-    }
-    const userId =
-      (req.body?.customer_id || req.body?.user_id || req.body?.external_id || req.body?.customer_email || "guest")
-        .toString()
-        .trim();
-    const uploaded = await uploadFileToS3({
-      file: req.file,
-      userId,
-      prefix: "reports",
-      defaultBaseName: "report",
-    });
-    fileUrl = uploaded.url;
-    fileName = fileName || uploaded.key.split("/").pop();
-  }
 
   try {
+    if (!fileUrl) {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "file_url or multipart file is required",
+          report_type: reportType,
+          fields: [],
+          issues: ["file_url or multipart file is required"],
+          parameters: [],
+        });
+      }
+      const userId =
+        (req.body?.customer_id || req.body?.user_id || req.body?.external_id || req.body?.customer_email || "guest")
+          .toString()
+          .trim();
+      const uploaded = await uploadFileToS3({
+        file: req.file,
+        userId,
+        prefix: "reports",
+        defaultBaseName: "report",
+      });
+      fileUrl = uploaded.url;
+      fileName = fileName || uploaded.key.split("/").pop();
+    }
+
     const startedAt = Date.now();
-    const result = await extractReportWithOpenAI({ reportType, fileUrl, fileName });
+    const result = await extractReportWithOpenAI({
+      reportType,
+      fileUrl,
+      fileName,
+      fileBuffer: req.file?.buffer,
+      mimeType: req.file?.mimetype,
+    });
     res.set("X-Reports-OCR-Duration-Ms", String(Date.now() - startedAt));
     return res.json({ ...result, file_url: fileUrl, file_name: fileName });
   } catch (error) {

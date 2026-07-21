@@ -88,8 +88,30 @@ function normalizeReportType(raw) {
   return value || "unknown";
 }
 
-function fileContentPart(fileUrl, fileName) {
+function dataUrlFromBuffer(fileBuffer, mimeType) {
+  if (!fileBuffer) return "";
+  return `data:${mimeType || "application/octet-stream"};base64,${Buffer.from(fileBuffer).toString("base64")}`;
+}
+
+function fileContentPart({ fileUrl, fileName, fileBuffer, mimeType }) {
   const lower = `${fileName || fileUrl}`.toLowerCase();
+  const mime = (mimeType || "").toLowerCase();
+  if (fileBuffer) {
+    if (lower.includes(".pdf") || mime === "application/pdf") {
+      return {
+        type: "input_file",
+        filename: fileName || "report.pdf",
+        file_data: dataUrlFromBuffer(fileBuffer, "application/pdf"),
+        detail: "low",
+      };
+    }
+    const imageMime = mime.startsWith("image/") ? mime : "image/jpeg";
+    return {
+      type: "input_image",
+      image_url: dataUrlFromBuffer(fileBuffer, imageMime),
+      detail: "low",
+    };
+  }
   if (lower.includes(".pdf") || lower.includes("application/pdf")) {
     return { type: "input_file", file_url: fileUrl };
   }
@@ -146,7 +168,7 @@ function normalizeExtractionResult(raw, reportType, expectedFields) {
   };
 }
 
-async function extractReportWithOpenAI({ reportType, fileUrl, fileName }) {
+async function extractReportWithOpenAI({ reportType, fileUrl, fileName, fileBuffer, mimeType }) {
   if (!OPENAI_API_KEY) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { statusCode: 503 });
   const expectedFields = REPORT_FIELDS[reportType] || [];
   const controller = new AbortController();
@@ -166,7 +188,7 @@ async function extractReportWithOpenAI({ reportType, fileUrl, fileName }) {
           role: "user",
           content: [
             { type: "input_text", text: buildPrompt(reportType, expectedFields) },
-            fileContentPart(fileUrl, fileName),
+            fileContentPart({ fileUrl, fileName, fileBuffer, mimeType }),
           ],
         }],
         text: {
