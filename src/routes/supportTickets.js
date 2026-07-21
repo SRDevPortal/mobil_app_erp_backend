@@ -4,6 +4,14 @@ const { erpCallMethod, erpCreate, erpGetDoc, erpGetList, erpUpdate } = require("
 const { DOCTYPE } = require("../config");
 const { resolveUserMiddleware } = require("../services/userService");
 const { mapSupportTicketToFrappe, nowFrappeDatetime, pickExternalId } = require("../normalize");
+const { saveNotification } = require("../services/notificationStore");
+const {
+  listSupportNotificationTargets,
+  readSupportNotificationStates,
+  upsertSupportNotificationTarget,
+  writeSupportNotificationStates,
+} = require("../services/supportNotificationStore");
+const { buildSupportTicketPush, sendSupportTicketPush } = require("../services/pushService");
 
 const router = express.Router();
 
@@ -869,6 +877,135 @@ async function countUnreadAgentMessages(ticket) {
   return countPendingAgentMessages(await getAllTicketMessages(ticket, { limit: 100, offset: 0 }));
 }
 
+function ticketStateKey(userId, ticket) {
+  return `${userId}:${ticket.ticket_number || ticket.name || ticket.id || ""}`;
+}
+
+function latestAgentMessage(messages = []) {
+  const agentMessages = messages
+    .map(mapMessage)
+    .filter((message) => message.sender_type === "agent")
+    .sort((a, b) => {
+      const at = new Date(a.created_at || a.updated_at || 0).getTime() || 0;
+      const bt = new Date(b.created_at || b.updated_at || 0).getTime() || 0;
+      return bt - at;
+    });
+  return agentMessages[0] || null;
+}
+
+function agentMessageStateKey(message) {
+  if (!message) return "";
+  return [
+    message.id || "",
+    message.created_at || "",
+    (message.message || "").toString().slice(0, 80),
+  ].join("|");
+}
+
+async function pushAndSaveSupportNotification(target, ticket, event, extra = {}) {
+  const built = buildSupportTicketPush({
+    event,
+    ticketId: ticket.id || ticket.name,
+    ticketNumber: ticket.ticket_number,
+    subject: ticket.subject,
+    status: ticket.status,
+    ...extra,
+  });
+  const push = await sendSupportTicketPush({
+    ...target,
+    event,
+    ticketId: ticket.id || ticket.name,
+    ticketNumber: ticket.ticket_number,
+    subject: ticket.subject,
+    status: ticket.status,
+    ...extra,
+  });
+  const notification = await saveNotification({
+    appointment: target,
+    event: built.event,
+    title: built.title,
+    body: built.body,
+    data: built.data,
+    push,
+  });
+  return { notification, push };
+}
+
+async function runSupportTicketNotifications(options = {}) {
+  const targets = await listSupportNotificationTargets();
+  const states = await readSupportNotificationStates();
+  const results = [];
+  let sent = 0;
+
+  for (const target of targets) {
+    const userId = (target.userId || "").toString().trim();
+    if (!userId) continue;
+    let rows = [];
+    try {
+      rows = await findTickets({
+        userId,
+        userLinkName: "",
+        userEmail: target.userEmail,
+        userPhone: target.userPhone,
+        userName: target.userName,
+        limit: 50,
+        offset: 0,
+      });
+    } catch (e) {
+      results.push({ userId, error: e.message });
+      continue;
+    }
+
+    for (const row of rows) {
+      const ticket = mapTicket({ ...row, external_id: row.external_id || userId });
+      const key = ticketStateKey(userId, ticket);
+      if (!key.endsWith(":")) {
+        const messages = await getAllTicketMessages({ ...row, ...ticket });
+        const latestAgent = latestAgentMessage(messages);
+        const nextState = {
+          status: ticket.status || "",
+          updatedAt: ticket.updated_at || "",
+          latestAgentMessageKey: agentMessageStateKey(latestAgent),
+          checkedAt: new Date().toISOString(),
+        };
+        const previous = states[key];
+        if (!previous) {
+          states[key] = nextState;
+          results.push({ ticket: ticket.ticket_number, seeded: true });
+          continue;
+        }
+
+        let event = null;
+        let extra = {};
+        if (
+          nextState.latestAgentMessageKey &&
+          nextState.latestAgentMessageKey !== previous.latestAgentMessageKey
+        ) {
+          event = "support_ticket_agent_reply";
+          extra = {
+            messageId: latestAgent?.id,
+            message: latestAgent?.message,
+          };
+        } else if (nextState.status && nextState.status !== previous.status) {
+          event = "support_ticket_status_update";
+        } else if (nextState.updatedAt && nextState.updatedAt !== previous.updatedAt) {
+          event = "support_ticket_updated";
+        }
+
+        if (event) {
+          const pushed = await pushAndSaveSupportNotification(target, ticket, event, extra);
+          if (pushed.push?.sent) sent += 1;
+          results.push({ ticket: ticket.ticket_number, event, sent: Boolean(pushed.push?.sent) });
+        }
+        states[key] = nextState;
+      }
+    }
+  }
+
+  await writeSupportNotificationStates(states);
+  return { checkedTargets: targets.length, results, sent, source: options.source || "manual" };
+}
+
 async function createMessageViaResource(ticketDoc, body) {
   const resource = await getMessageResource(ticketDoc.__doctype || SUPPORT_RESOURCE_DOCTYPES[0]);
   const fieldSet = resource?.fieldSet || null;
@@ -1154,6 +1291,31 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.post("/notifications/register", async (req, res) => {
+  try {
+    const target = await upsertSupportNotificationTarget({
+      ...(req.body || {}),
+      userId:
+        req.body?.user_id ||
+        req.body?.patient_id ||
+        req.body?.external_id ||
+        req.body?.customer_id,
+    });
+    return res.json({ success: true, data: { target } });
+  } catch (e) {
+    return res.status(e.status || 500).json({ success: false, message: e.message });
+  }
+});
+
+router.post("/notifications/run", async (_req, res) => {
+  try {
+    const result = await runSupportTicketNotifications({ source: "manual" });
+    return res.json({ success: true, data: result });
+  } catch (e) {
+    return res.status(e.status || 500).json({ success: false, message: e.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const ticketDoc = await resolveTicket(req.params.id);
@@ -1229,5 +1391,7 @@ router.post("/:id/messages/read", async (req, res) => {
     return res.status(e.status || 500).json({ success: false, message: e.message });
   }
 });
+
+router.runSupportTicketNotifications = runSupportTicketNotifications;
 
 module.exports = router;

@@ -147,6 +147,9 @@ function titleForEvent(event) {
   if (event === "booking_confirmed") return "Appointment Confirmed";
   if (event === "appointment_rescheduled") return "Appointment Rescheduled";
   if (event === "appointment_reminder") return "Appointment Reminder";
+  if (event === "support_ticket_agent_reply") return "Support Ticket Reply";
+  if (event === "support_ticket_status_update") return "Support Ticket Updated";
+  if (event === "support_ticket_updated") return "Support Ticket Updated";
   return "Appointment Update";
 }
 
@@ -158,6 +161,24 @@ function bodyForEvent({ event, appointmentDate, appointmentTime, doctorName }) {
   if (event === "appointment_rescheduled") return `Your appointment with ${doctor} is rescheduled for ${date} at ${time}.`;
   if (event === "appointment_reminder") return `Reminder: your appointment with ${doctor} is at ${time}.`;
   return `Your appointment with ${doctor} is scheduled for ${date} at ${time}.`;
+}
+
+function supportTicketBodyForEvent({ event, ticketNumber, subject, status, message }) {
+  const ticket = clean(ticketNumber) || "your ticket";
+  const topic = clean(subject);
+  const statusText = clean(status);
+  const text = clean(message);
+  if (event === "support_ticket_agent_reply") {
+    return text
+      ? `Agent replied on ${ticket}: ${text}`.slice(0, 220)
+      : `Agent replied on ${topic || ticket}.`;
+  }
+  if (event === "support_ticket_status_update") {
+    return statusText
+      ? `${ticket} status changed to ${statusText}.`
+      : `${ticket} has a new update.`;
+  }
+  return `${ticket} has a new support update.`;
 }
 
 function buildAppointmentPush(input) {
@@ -198,4 +219,42 @@ async function sendAppointmentPush(input) {
   return { event, firebase, oneSignal, sent: Boolean(oneSignal.sent || firebase.sent) };
 }
 
-module.exports = { buildAppointmentPush, sendAppointmentPush };
+function buildSupportTicketPush(input) {
+  const event = clean(input.event) || "support_ticket_updated";
+  const data = {
+    type: "support_ticket",
+    event,
+    ticketId: clean(input.ticketId || input.ticket_id || input.id),
+    ticketNumber: clean(input.ticketNumber || input.ticket_number),
+    subject: clean(input.subject || input.title),
+    status: clean(input.status),
+    messageId: clean(input.messageId || input.message_id),
+    message: clean(input.message),
+    screen: "support_ticket_details",
+  };
+  const title = clean(input.title) || titleForEvent(event);
+  const body = clean(input.body) || supportTicketBodyForEvent({ ...data, event });
+  return { event, data, title, body };
+}
+
+async function sendSupportTicketPush(input) {
+  const { event, data, title, body } = buildSupportTicketPush(input);
+  const [oneSignal, firebase] = await Promise.all([
+    sendOneSignalPush({
+      oneSignalUserId: input.oneSignalUserId || input.onesignal_user_id || input.player_id,
+      oneSignalPushToken: input.oneSignalPushToken || input.one_signal_push_token,
+      title,
+      body,
+      data,
+    }),
+    sendFirebasePush({ fcmToken: input.fcmToken || input.fcm_token, title, body, data }),
+  ]);
+  return { event, firebase, oneSignal, sent: Boolean(oneSignal.sent || firebase.sent) };
+}
+
+module.exports = {
+  buildAppointmentPush,
+  buildSupportTicketPush,
+  sendAppointmentPush,
+  sendSupportTicketPush,
+};

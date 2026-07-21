@@ -84,17 +84,27 @@ async function readNotifications() {
 async function saveNotification({ appointment, event, title, body, data, push }) {
   const items = await readNotifications();
   const bookingId = clean(data.bookingId || appointment.bookingId);
+  const ticketId = clean(data.ticketId || data.ticket_id || appointment.ticketId || appointment.id);
+  const ticketNumber = clean(data.ticketNumber || data.ticket_number || appointment.ticketNumber);
   const appointmentTime = clean(data.appointmentTime);
-  const id = bookingId
-    ? `appointment-${bookingId}-${event}-${appointmentTime.replace(/[^a-zA-Z0-9]/g, "")}-${Date.now()}`
-    : `appointment-${event}-${Date.now()}`;
+  const type = clean(data.type) || (ticketId || ticketNumber ? "support_ticket" : "appointment");
+  const id = ticketId || ticketNumber
+    ? `support-ticket-${ticketId || ticketNumber}-${event}-${clean(data.messageId || data.message_id || data.status).replace(/[^a-zA-Z0-9]/g, "")}-${Date.now()}`
+    : bookingId
+      ? `appointment-${bookingId}-${event}-${appointmentTime.replace(/[^a-zA-Z0-9]/g, "")}-${Date.now()}`
+      : `${type}-${event}-${Date.now()}`;
   const item = {
     id,
     title: clean(title) || "Notification",
     body: clean(body),
-    type: clean(data.type) || "appointment",
+    type,
     event: clean(event),
     bookingId,
+    ticketId,
+    ticketNumber,
+    subject: clean(data.subject),
+    status: clean(data.status),
+    messageId: clean(data.messageId || data.message_id),
     appointmentDate: clean(data.appointmentDate),
     appointmentTime,
     doctorName: clean(data.doctorName),
@@ -111,9 +121,9 @@ async function saveNotification({ appointment, event, title, body, data, push })
     razorpayPaymentId: clean(data.razorpayPaymentId || data.razorpay_payment_id),
     paidAmount: clean(data.paidAmount || data.paid_amount),
     payableAtClinic: clean(data.payableAtClinic || data.payable_at_clinic),
-    oneSignalUserId: clean(appointment.oneSignalUserId),
-    oneSignalPushToken: clean(appointment.oneSignalPushToken),
-    fcmToken: clean(appointment.fcmToken),
+    oneSignalUserId: clean(appointment.oneSignalUserId || appointment.onesignal_user_id || appointment.player_id),
+    oneSignalPushToken: clean(appointment.oneSignalPushToken || appointment.one_signal_push_token),
+    fcmToken: clean(appointment.fcmToken || appointment.fcm_token),
     data: data || {},
     push: push || null,
     sentAt: new Date().toISOString(),
