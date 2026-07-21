@@ -17,6 +17,7 @@ const {
 const { requireAppToken } = require("./middleware/requireAppToken");
 
 const bootstrapRouter = require("./routes/bootstrap");
+const startupRouter = require("./routes/startup");
 const usersRouter = require("./routes/users");
 const profilesRouter = require("./routes/profiles");
 const diseasesRouter = require("./routes/diseases");
@@ -81,6 +82,7 @@ function createApp() {
   app.use("/api/v1", requireAppToken);
 
   app.use("/api/v1/bootstrap", bootstrapRouter);
+  app.use("/api/v1/startup", startupRouter);
   app.use("/api/v1/users", usersRouter);
   app.use("/api/v1/profiles", profilesRouter);
   app.use("/api/v1/diseases", diseasesRouter);
