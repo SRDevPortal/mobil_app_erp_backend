@@ -168,6 +168,25 @@ function normalizeExtractionResult(raw, reportType, expectedFields) {
   };
 }
 
+function extractResponseText(payload) {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text;
+  }
+  const parts = [];
+  for (const output of Array.isArray(payload?.output) ? payload.output : []) {
+    for (const content of Array.isArray(output?.content) ? output.content : []) {
+      const text =
+        typeof content?.text === "string"
+          ? content.text
+          : typeof content?.json === "string"
+            ? content.json
+            : "";
+      if (text.trim()) parts.push(text);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
 async function extractReportWithOpenAI({ reportType, fileUrl, fileName, fileBuffer, mimeType }) {
   if (!OPENAI_API_KEY) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { statusCode: 503 });
   const expectedFields = REPORT_FIELDS[reportType] || [];
@@ -207,7 +226,7 @@ async function extractReportWithOpenAI({ reportType, fileUrl, fileName, fileBuff
         statusCode: response.status,
       });
     }
-    const outputText = payload.output_text || "";
+    const outputText = extractResponseText(payload);
     if (!outputText.trim()) throw new Error("OpenAI returned an empty extraction response");
     return normalizeExtractionResult(JSON.parse(outputText), reportType, expectedFields);
   } catch (error) {
