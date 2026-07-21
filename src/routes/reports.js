@@ -1,8 +1,14 @@
 const express = require("express");
+const multer = require("multer");
 const { APP_ERP_TOKEN, REPORTS_OCR_TOKEN } = require("../config");
 const { extractReportWithOpenAI, normalizeReportType } = require("../services/reportOcr");
+const { uploadFileToS3 } = require("../services/s3PrescriptionUpload");
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024 },
+});
 
 function safeEqualText(a, b) {
   const left = (a || "").toString();
@@ -21,26 +27,40 @@ function requireReportsToken(req, res, next) {
   return next();
 }
 
-router.post("/extract", requireReportsToken, async (req, res) => {
+router.post("/extract", requireReportsToken, upload.single("file"), async (req, res) => {
   const reportType = normalizeReportType(req.body?.report_type);
-  const fileUrl = (req.body?.file_url || "").toString().trim();
-  const fileName = (req.body?.file_name || "").toString().trim();
+  let fileUrl = (req.body?.file_url || "").toString().trim();
+  let fileName = (req.body?.file_name || req.file?.originalname || "").toString().trim();
   if (!fileUrl) {
-    return res.status(400).json({
-      success: false,
-      message: "file_url is required",
-      report_type: reportType,
-      fields: [],
-      issues: ["file_url is required"],
-      parameters: [],
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "file_url or multipart file is required",
+        report_type: reportType,
+        fields: [],
+        issues: ["file_url or multipart file is required"],
+        parameters: [],
+      });
+    }
+    const userId =
+      (req.body?.customer_id || req.body?.user_id || req.body?.external_id || req.body?.customer_email || "guest")
+        .toString()
+        .trim();
+    const uploaded = await uploadFileToS3({
+      file: req.file,
+      userId,
+      prefix: "reports",
+      defaultBaseName: "report",
     });
+    fileUrl = uploaded.url;
+    fileName = fileName || uploaded.key.split("/").pop();
   }
 
   try {
     const startedAt = Date.now();
     const result = await extractReportWithOpenAI({ reportType, fileUrl, fileName });
     res.set("X-Reports-OCR-Duration-Ms", String(Date.now() - startedAt));
-    return res.json(result);
+    return res.json({ ...result, file_url: fileUrl, file_name: fileName });
   } catch (error) {
     const statusCode = error.statusCode || 502;
     console.error("Report extraction failed:", error);
