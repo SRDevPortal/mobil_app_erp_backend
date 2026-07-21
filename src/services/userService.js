@@ -165,14 +165,38 @@ function mergeV1ChildTablesIntoLookupResponse(enrichedBase, v1Data) {
 
 function partitionV1UsersLookupData(data) {
   if (!data || typeof data !== "object") {
-    return { user: null, profile: null, disease_selection: null };
+    return {
+      user: null,
+      profile: null,
+      profiles: [],
+      disease_selection: null,
+      sessions: [],
+      medical_items: [],
+      appointments: [],
+      health_entries: [],
+      engagement_items: [],
+    };
   }
-  const profiles = data.profiles;
-  const medical_items = data.medical_items;
+  const profiles = Array.isArray(data.profiles) ? data.profiles : [];
+  const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  const medical_items = Array.isArray(data.medical_items) ? data.medical_items : [];
+  const appointments = Array.isArray(data.appointments) ? data.appointments : [];
+  const health_entries = Array.isArray(data.health_entries) ? data.health_entries : [];
+  const engagement_items = Array.isArray(data.engagement_items) ? data.engagement_items : [];
   const user = enrichMobileAppUserForApi(stripV1ChildTables(data));
-  const profile = Array.isArray(profiles) && profiles.length ? profiles[0] : null;
+  const profile = profiles.length ? profiles[0] : null;
   const disease_selection = pickDiseaseFromV1Medical(medical_items);
-  return { user, profile, disease_selection };
+  return {
+    user,
+    profile,
+    profiles,
+    disease_selection,
+    sessions,
+    medical_items,
+    appointments,
+    health_entries,
+    engagement_items,
+  };
 }
 
 /**
@@ -278,13 +302,29 @@ async function getUserContextForApi(query = {}) {
   const merged = { ...query };
   const v1Data = await tryUsersLookupV1(merged);
   if (v1Data) {
-    const { user, profile, disease_selection } = partitionV1UsersLookupData(v1Data);
+    const {
+      user,
+      profile,
+      profiles,
+      disease_selection,
+      sessions,
+      medical_items,
+      appointments,
+      health_entries,
+      engagement_items,
+    } = partitionV1UsersLookupData(v1Data);
     if (!user || typeof user !== "object") return null;
     const ext = user.external_id != null ? String(user.external_id).trim() : "";
     return {
       user: attachCustomerIdentity(user, ext),
       profile,
+      profiles,
       disease_selection,
+      sessions,
+      medical_items,
+      appointments,
+      health_entries,
+      engagement_items,
     };
   }
 
@@ -331,7 +371,13 @@ async function getUserContextForApi(query = {}) {
   return {
     user: attachCustomerIdentity(enrichedUser, enrichedUser.external_id),
     profile: profiles[0] || null,
+    profiles,
     disease_selection: diseases[0] || null,
+    sessions: Array.isArray(enrichedUser.sessions) ? enrichedUser.sessions : [],
+    medical_items: Array.isArray(enrichedUser.medical_items) ? enrichedUser.medical_items : [],
+    appointments: Array.isArray(enrichedUser.appointments) ? enrichedUser.appointments : [],
+    health_entries: Array.isArray(enrichedUser.health_entries) ? enrichedUser.health_entries : [],
+    engagement_items: Array.isArray(enrichedUser.engagement_items) ? enrichedUser.engagement_items : [],
   };
 }
 
