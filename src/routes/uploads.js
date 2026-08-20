@@ -41,7 +41,8 @@ const prescriptionUpload = multer({
 
 router.post("/prescription", prescriptionUpload.single("file"), async (req, res) => {
   try {
-    const rawUserId = req.query?.userId || req.query?.user_id || req.body?.userId || req.body?.user_id;
+    const rawUserId =
+      req.authUser?.id || req.query?.userId || req.query?.user_id || req.body?.userId || req.body?.user_id;
     const uploaded = await uploadPrescriptionToS3({ file: req.file, userId: rawUserId });
     let erpSaved = null;
     let erpWarning = null;

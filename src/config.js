@@ -39,6 +39,7 @@ const PORT = Number(process.env.PORT || 3101);
 /** Supabase project (for POST /api/auth/verify-supabase — validates user JWT like n8n). */
 const SUPABASE_URL = trim(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = normalizeSecret(process.env.SUPABASE_ANON_KEY || "");
+const SUPABASE_SERVICE_ROLE_KEY = normalizeSecret(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
 
 const APP_NOTIFICATION_TOKEN = normalizeSecret(process.env.APP_NOTIFICATION_TOKEN || APP_ERP_TOKEN);
 const ONESIGNAL_APP_ID = normalizeSecret(process.env.ONESIGNAL_APP_ID || "");
@@ -124,6 +125,7 @@ module.exports = {
   PORT,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY,
   APP_NOTIFICATION_TOKEN,
   APPOINTMENT_TIMEZONE_OFFSET_MINUTES,
   FCM_SERVER_KEY,

@@ -1,4 +1,4 @@
-const { SUPABASE_URL, SUPABASE_ANON_KEY } = require("./config");
+const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY } = require("./config");
 
 /**
  * Validates a Supabase session JWT via GET /auth/v1/user (same as your n8n HTTP Request).
@@ -9,7 +9,8 @@ async function fetchSupabaseUser(accessToken) {
   const token = (accessToken || "").toString().trim();
   if (!token) return null;
 
-  const url = `${SUPABASE_URL.replace(/\/+$/, "")}/auth/v1/user`;
+  const base = SUPABASE_URL.replace(/\/auth\/v1\/user\/?$/, "").replace(/\/+$/, "");
+  const url = `${base}/auth/v1/user`;
   const res = await fetch(url, {
     headers: {
       apikey: SUPABASE_ANON_KEY,
@@ -22,4 +23,24 @@ async function fetchSupabaseUser(accessToken) {
   return res.json();
 }
 
-module.exports = { fetchSupabaseUser };
+async function deleteSupabaseUser(userId) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw Object.assign(new Error("Supabase account deletion is not configured"), { status: 503 });
+  }
+  const base = SUPABASE_URL.replace(/\/auth\/v1\/user\/?$/, "").replace(/\/+$/, "");
+  const res = await fetch(`${base}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+  });
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text();
+    throw Object.assign(new Error(`Supabase account deletion failed: ${text || res.status}`), {
+      status: 502,
+    });
+  }
+}
+
+module.exports = { fetchSupabaseUser, deleteSupabaseUser };

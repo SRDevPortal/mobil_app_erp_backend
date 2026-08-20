@@ -20,6 +20,7 @@ function safeEqualText(a, b) {
 }
 
 function requireReportsToken(req, res, next) {
+  if (req.authUser?.id) return next();
   const supplied = req.get("x-reports-ocr-token") || req.get("x-erp-token") || "";
   const expected = REPORTS_OCR_TOKEN || APP_ERP_TOKEN;
   if (!expected) return res.status(503).json({ success: false, message: "REPORTS_OCR_TOKEN is not configured" });
@@ -45,7 +46,7 @@ router.post("/extract", requireReportsToken, upload.single("file"), async (req, 
         });
       }
       const userId =
-        (req.body?.customer_id || req.body?.user_id || req.body?.external_id || req.body?.customer_email || "guest")
+        (req.authUser?.id || req.body?.customer_id || req.body?.user_id || req.body?.external_id || req.body?.customer_email || "guest")
           .toString()
           .trim();
       const uploaded = await uploadFileToS3({

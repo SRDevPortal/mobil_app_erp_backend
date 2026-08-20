@@ -82,3 +82,12 @@ After deploy, use your Render HTTPS URL as `BACKEND_ERP_BASE_URL` in the Flutter
 ## Node version
 
 Requires **Node 18+** for global `fetch`.
+# Production authentication
+
+Mobile clients authenticate protected endpoints with their Supabase access JWT
+in `Authorization: Bearer <token>`. Keep `APP_ERP_TOKEN` only for trusted
+server-to-server/Postman access; never bundle it in a mobile application.
+
+Set `SUPABASE_SERVICE_ROLE_KEY` in the deployed backend environment to enable
+the authenticated `DELETE /api/v1/account` flow. This key is server-only and
+must never be exposed to Flutter, source control, logs, or public build output.

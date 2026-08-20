@@ -139,7 +139,9 @@ router.post("/profile-image", upload.single("file"), async (req, res) => {
 
     const body = req.body || {};
     const external_id = pickExternalId(body);
-    const supabase_user_id = (body.supabase_user_id || body.supabaseUserId || external_id || "").toString().trim();
+    const supabase_user_id = (
+      req.authUser?.id || body.supabase_user_id || body.supabaseUserId || external_id || ""
+    ).toString().trim();
     if (!supabase_user_id) {
       return res.status(400).json({ success: false, message: "Provide supabase_user_id or external_id" });
     }

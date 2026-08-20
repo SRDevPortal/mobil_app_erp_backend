@@ -16,7 +16,7 @@ const {
   SUPPORT_TICKET_NOTIFICATION_POLL_INTERVAL_MS,
   SUPPORT_TICKET_NOTIFICATION_SCHEDULER_DISABLED,
 } = require("./config");
-const { requireAppToken } = require("./middleware/requireAppToken");
+const { requireAppToken, requireUserOrAppToken } = require("./middleware/requireAppToken");
 
 const bootstrapRouter = require("./routes/bootstrap");
 const startupRouter = require("./routes/startup");
@@ -36,6 +36,7 @@ const uploadsRouter = require("./routes/uploads");
 const webhookEventsRouter = require("./routes/webhookEvents");
 const authRouter = require("./routes/auth");
 const paymentsRouter = require("./routes/payments");
+const accountRouter = require("./routes/account");
 const { startReminderScheduler } = require("./services/reminderScheduler");
 
 let supportTicketNotificationInterval = null;
@@ -80,6 +81,14 @@ function createApp() {
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
 
+  app.get("/privacy", (_req, res) => {
+    res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SRIAAS Privacy Policy</title></head><body style="font:16px/1.55 sans-serif;max-width:800px;margin:40px auto;padding:0 20px"><h1>SRIAAS Privacy Policy</h1><p>Last updated: 20 August 2026</p><p>SRIAAS processes account details, contact details, health profile information, health tracker entries, prescriptions, appointments, support messages, payment status and device notification identifiers to provide the app's health-management and appointment features.</p><h2>How data is used</h2><p>Data is used to authenticate users, synchronize their records, provide requested health tracking and appointment services, process payments, deliver notifications, provide support, secure the service and comply with law. SRIAAS does not sell personal or health data.</p><h2>Service providers</h2><p>Data may be processed by Supabase (authentication), Frappe/ERPNext and SRIAAS hosting (records), cloud file storage (uploads), Firebase and OneSignal (notifications), Razorpay (payments), and OpenAI-powered server processing when a user requests report extraction. These providers process only the information needed for their function.</p><h2>Retention and security</h2><p>Records are retained while an account is active and as required for legal, medical, accounting or fraud-prevention obligations. Access controls, encrypted transport and restricted server credentials are used to protect data. No Internet service can guarantee absolute security.</p><h2>Your choices</h2><p>Users can review or update profile information in the app and can delete their account from Profile. Deletion removes the account and associated app data except information that must legally be retained. You may also request deletion at <a href="mailto:support@sriaas.com?subject=SRIAAS%20account%20deletion">support@sriaas.com</a>.</p><h2>Medical disclaimer</h2><p>SRIAAS is not a medical device and does not diagnose, treat, cure, or prevent any medical condition. Consult a qualified healthcare professional for medical advice, diagnosis, or treatment.</p><h2>Contact</h2><p><a href="mailto:support@sriaas.com">support@sriaas.com</a></p></body></html>`);
+  });
+
+  app.get("/account-deletion", (_req, res) => {
+    res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Delete SRIAAS Account</title></head><body style="font:16px/1.55 sans-serif;max-width:800px;margin:40px auto;padding:0 20px"><h1>Delete your SRIAAS account</h1><p>Open SRIAAS, go to <strong>Profile</strong>, choose <strong>Delete account</strong>, and follow the confirmation steps. This deletes your sign-in account and associated app profile, health tracker, prescription, appointment, support and notification records, except records SRIAAS must retain to meet legal obligations.</p><p>If you cannot access the app, email <a href="mailto:support@sriaas.com?subject=SRIAAS%20account%20deletion">support@sriaas.com</a> from the address registered to your account. We will verify the request before deletion.</p></body></html>`);
+  });
+
   /** Supabase JWT verification + Mobile App User upsert (no APP_ERP_TOKEN). */
   app.use("/api/auth", authRouter);
 
@@ -110,7 +119,7 @@ function createApp() {
     });
   });
 
-  app.use("/api/v1", requireAppToken);
+  app.use("/api/v1", requireUserOrAppToken);
 
   app.use("/api/v1/bootstrap", bootstrapRouter);
   app.use("/api/v1/startup", startupRouter);
@@ -128,7 +137,8 @@ function createApp() {
   app.use("/api/v1/support-tickets", supportTicketsRouter);
   app.use("/api/v1/support/tickets", supportTicketsRouter);
   app.use("/api/v1/payments", paymentsRouter);
-  app.use("/api/upload", requireAppToken, uploadsRouter);
+  app.use("/api/v1/account", accountRouter);
+  app.use("/api/upload", requireUserOrAppToken, uploadsRouter);
   app.use("/api/v1/webhook-events", webhookEventsRouter);
 
   app.use((err, _req, res, _next) => {
