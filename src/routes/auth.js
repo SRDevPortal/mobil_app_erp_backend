@@ -2,6 +2,7 @@ const express = require("express");
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = require("../config");
 const { fetchSupabaseUser } = require("../supabaseAuth");
 const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
+const { syncMobileAppUserViaV1 } = require("../services/userService");
 const { attachCustomerIdentity } = require("../normalize");
 
 const router = express.Router();
@@ -86,7 +87,10 @@ router.post("/verify-supabase", async (req, res) => {
       last_login_at: new Date().toISOString(),
     };
 
-    const { saved, external_id } = await upsertMobileAppUser(payload);
+    const fromV1 = await syncMobileAppUserViaV1(payload);
+    const fallback = fromV1 ? null : await upsertMobileAppUser(payload);
+    const saved = fromV1 || fallback.saved;
+    const external_id = fromV1?.external_id || fallback?.external_id || supabaseUser.id;
 
     const erpFullName =
       (saved?.full_name != null && String(saved.full_name).trim() !== ""
