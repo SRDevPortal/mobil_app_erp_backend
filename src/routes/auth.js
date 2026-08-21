@@ -1,7 +1,6 @@
 const express = require("express");
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = require("../config");
 const { fetchSupabaseUser } = require("../supabaseAuth");
-const { upsertMobileAppUser } = require("../services/mobileAppUserSync");
 const { syncMobileAppUserViaV1 } = require("../services/userService");
 const { attachCustomerIdentity } = require("../normalize");
 
@@ -87,10 +86,11 @@ router.post("/verify-supabase", async (req, res) => {
       last_login_at: new Date().toISOString(),
     };
 
-    const fromV1 = await syncMobileAppUserViaV1(payload);
-    const fallback = fromV1 ? null : await upsertMobileAppUser(payload);
-    const saved = fromV1 || fallback.saved;
-    const external_id = fromV1?.external_id || fallback?.external_id || supabaseUser.id;
+    // Mobile App User has a controller-level permission check that blocks
+    // Resource API creation even when role permissions include Create. The
+    // app-token-protected Frappe method is the authoritative onboarding path.
+    const saved = await syncMobileAppUserViaV1(payload, { throwOnError: true });
+    const external_id = saved.external_id || supabaseUser.id;
 
     const erpFullName =
       (saved?.full_name != null && String(saved.full_name).trim() !== ""

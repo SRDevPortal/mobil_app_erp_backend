@@ -221,7 +221,7 @@ async function tryUsersLookupV1(merged = {}) {
   }
 }
 
-async function syncMobileAppUserViaV1(body = {}) {
+async function syncMobileAppUserViaV1(body = {}, { throwOnError = false } = {}) {
   try {
     const parsed = await erpCallMethod("mobile_app.api.v1.users_sync", {
       method: "POST",
@@ -229,9 +229,15 @@ async function syncMobileAppUserViaV1(body = {}) {
       appToken: true,
     });
     const data = unwrapMobileAppV1Message(parsed);
-    if (!data || typeof data !== "object") return null;
+    if (!data || typeof data !== "object") {
+      if (throwOnError) {
+        throw Object.assign(new Error("Frappe users_sync returned no Mobile App User"), { status: 502 });
+      }
+      return null;
+    }
     return enrichMobileAppUserForApi(stripV1ChildTables(data));
   } catch (e) {
+    if (throwOnError) throw e;
     console.warn("[userService] mobile_app.api.v1.users_sync failed, legacy fallback:", e.message);
     return null;
   }

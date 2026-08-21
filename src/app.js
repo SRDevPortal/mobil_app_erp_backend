@@ -13,6 +13,7 @@ const {
   MOBILE_APP_ERP_TOKEN,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY,
   SUPPORT_TICKET_NOTIFICATION_POLL_INTERVAL_MS,
   SUPPORT_TICKET_NOTIFICATION_SCHEDULER_DISABLED,
 } = require("./config");
@@ -96,6 +97,7 @@ function createApp() {
     res.json({
       success: true,
       service: "sriaas-backend-erp",
+      release: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || null,
       frappe: {
         baseUrlConfigured: Boolean(ERP_BASE_URL),
         erpBaseHost: safeHost(ERP_BASE_URL),
@@ -115,6 +117,7 @@ function createApp() {
       },
       supabase: {
         configured: Boolean(SUPABASE_URL && SUPABASE_ANON_KEY),
+        serviceRoleConfigured: Boolean(SUPABASE_SERVICE_ROLE_KEY),
       },
     });
   });
