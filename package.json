@@ -16,7 +16,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
-    "google-auth-library": "^9.15.1",
+    "google-auth-library": "^11.0.2",
     "multer": "^2.0.2"
   },
   "devDependencies": {
