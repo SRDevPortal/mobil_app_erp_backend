@@ -159,4 +159,28 @@ router.post("/attachments", upload.single("file"), async (req, res) => {
   }
 });
 
+router.post("/escalate", async (req, res) => {
+  try {
+    const externalId = authenticatedExternalId(req);
+    if (!externalId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated user is required",
+      });
+    }
+    const payload = await erpCallMethod(`${METHOD_ROOT}.escalate`, {
+      method: "POST",
+      appToken: true,
+      body: {
+        external_id: externalId,
+        conversation: req.body?.conversation,
+        profile_id: req.body?.profile_id,
+      },
+    });
+    return sendMethodResult(res, payload);
+  } catch (error) {
+    return errorResponse(res, error);
+  }
+});
+
 module.exports = router;
