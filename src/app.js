@@ -14,8 +14,6 @@ const {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   SUPABASE_SERVICE_ROLE_KEY,
-  SUPPORT_TICKET_NOTIFICATION_POLL_INTERVAL_MS,
-  SUPPORT_TICKET_NOTIFICATION_SCHEDULER_DISABLED,
 } = require("./config");
 const { requireAppToken, requireUserOrAppToken } = require("./middleware/requireAppToken");
 
@@ -31,7 +29,7 @@ const doctorsRouter = require("./routes/doctors");
 const appointmentsRouter = require("./routes/appointments");
 const appointmentNotificationsRouter = require("./routes/appointmentNotifications");
 const notificationsRouter = require("./routes/notifications");
-const supportTicketsRouter = require("./routes/supportTickets");
+const aiChatRouter = require("./routes/aiChat");
 const reportsRouter = require("./routes/reports");
 const uploadsRouter = require("./routes/uploads");
 const webhookEventsRouter = require("./routes/webhookEvents");
@@ -39,35 +37,6 @@ const authRouter = require("./routes/auth");
 const paymentsRouter = require("./routes/payments");
 const accountRouter = require("./routes/account");
 const { startReminderScheduler } = require("./services/reminderScheduler");
-
-let supportTicketNotificationInterval = null;
-
-function startSupportTicketNotificationScheduler() {
-  if (SUPPORT_TICKET_NOTIFICATION_SCHEDULER_DISABLED) {
-    console.log("[supportTicketNotifications] disabled by SUPPORT_TICKET_NOTIFICATION_SCHEDULER_DISABLED=true");
-    return;
-  }
-  if (supportTicketNotificationInterval) return;
-  const run = async (source) => {
-    try {
-      const result = await supportTicketsRouter.runSupportTicketNotifications?.({ source });
-      if (result) {
-        console.log(
-          `[supportTicketNotifications] ${source}: sent=${result.sent}, checkedTargets=${result.checkedTargets}`,
-        );
-      }
-    } catch (e) {
-      console.error("[supportTicketNotifications] run failed:", e.message);
-    }
-  };
-  setTimeout(() => run("startup"), 10 * 1000).unref?.();
-  supportTicketNotificationInterval = setInterval(
-    () => run("scheduler"),
-    SUPPORT_TICKET_NOTIFICATION_POLL_INTERVAL_MS,
-  );
-  supportTicketNotificationInterval.unref?.();
-  console.log(`[supportTicketNotifications] started intervalMs=${SUPPORT_TICKET_NOTIFICATION_POLL_INTERVAL_MS}`);
-}
 
 function safeHost(value) {
   try {
@@ -137,8 +106,7 @@ function createApp() {
   app.use("/api/v1", appointmentNotificationsRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/reports", reportsRouter);
-  app.use("/api/v1/support-tickets", supportTicketsRouter);
-  app.use("/api/v1/support/tickets", supportTicketsRouter);
+  app.use("/api/v1/ai-chat", aiChatRouter);
   app.use("/api/v1/payments", paymentsRouter);
   app.use("/api/v1/account", accountRouter);
   app.use("/api/upload", requireUserOrAppToken, uploadsRouter);
@@ -158,7 +126,6 @@ function listen() {
     console.log(`backend-erp listening on http://localhost:${PORT}`);
     console.log(`health: http://localhost:${PORT}/api/health`);
     startReminderScheduler();
-    startSupportTicketNotificationScheduler();
   });
 }
 
