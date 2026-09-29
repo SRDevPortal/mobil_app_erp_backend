@@ -189,6 +189,7 @@ function buildAppointmentPush(input) {
     bookingId: clean(input.bookingId || input.booking_id),
     appointmentDate: clean(input.appointmentDate || input.appointment_date),
     appointmentTime: clean(input.appointmentTime || input.appointment_time),
+    practitioner_id: clean(input.practitioner_id || input.practitionerId),
     doctorName: clean(input.doctorName || input.doctor_name),
     patientName: clean(input.patientName || input.patient_name),
     patientEmail: clean(input.patientEmail || input.patient_email || input.email),

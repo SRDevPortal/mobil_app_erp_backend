@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { DOCTYPE } = require("../config");
-const { erpCreate, erpDelete, erpGetDoc, erpGetList, erpUpdate } = require("../frappeClient");
+const { erpCreate, erpDelete, erpGetDoc, erpGetList, erpUpdate, erpCallMethod } = require("../frappeClient");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const { mapAppointmentChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
 
@@ -234,6 +234,16 @@ router.post("/", async (req, res) => {
     const newRow = mapAppointmentChildRowForFullSync(rowBody, parentExternalId);
     if (!newRow?.appointment_external_id) {
       return res.status(400).json({ success: false, message: "appointment_external_id could not be set" });
+    }
+
+    if (newRow.practitioner_id) {
+      // One Frappe transaction validates availability and writes both representations.
+      // Never fall back to a non-atomic save after a schedule/conflict rejection.
+      const result = await erpCallMethod("mobile_app.api.practitioners.book_appointment", {
+        method: "POST",
+        body: { user_name: userRow?.name || parentExternalId, appointment: newRow },
+      });
+      return res.status(201).json({ success: true, data: result.message });
     }
 
     let existing = [];
