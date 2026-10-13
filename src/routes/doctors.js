@@ -4,6 +4,7 @@ const { DOCTYPE } = require("../config");
 const { erpCreate, erpUpdate, erpGetList, erpGetDoc, erpCallMethod } = require("../frappeClient");
 const { ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { mapDoctorToFrappe, pickExternalId } = require("../normalize");
+const { doctorPhotoSource } = require("../services/doctorPhotoSource");
 
 const router = express.Router();
 
@@ -50,10 +51,9 @@ router.get("/:id/photo", async (req, res) => {
   try {
     const doctor = await erpGetDoc("Healthcare Practitioner", req.params.id);
     if (!doctor?.image) return res.sendStatus(404);
-    const url = new URL(doctor.image, ERP_BASE_URL);
-    if (url.origin !== new URL(ERP_BASE_URL).origin ||
-        !/^\/(private\/)?files\//.test(url.pathname)) return res.sendStatus(404);
-    const image = await fetch(url, { headers: erpAuthHeader(), redirect: "error", signal: AbortSignal.timeout(15000) });
+    const source = doctorPhotoSource(doctor.image, ERP_BASE_URL, erpAuthHeader());
+    if (!source) return res.sendStatus(404);
+    const image = await fetch(source.url, { headers: source.headers, redirect: "error", signal: AbortSignal.timeout(15000) });
     if (!image.ok) return res.sendStatus(image.status);
     const type = image.headers.get("content-type") || "";
     if (!/^image\/(png|jpeg|webp|gif)(;|$)/i.test(type)) return res.sendStatus(415);
