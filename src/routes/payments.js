@@ -1,33 +1,24 @@
 const crypto = require("crypto");
 const express = require("express");
 const {
-  APPOINTMENT_FEE_ONLINE_PAISE,
-  APPOINTMENT_FEE_OPD_PAISE,
-  APPOINTMENT_OPD_PAYABLE_AT_CLINIC_PAISE,
   RAZORPAY_CURRENCY,
   RAZORPAY_KEY_ID,
   RAZORPAY_KEY_SECRET,
 } = require("../config");
+const { erpCallMethod } = require('../frappeClient');
+const { appAppointmentPricing } = require('../services/appAppointmentPricing');
 
 const router = express.Router();
 
 const clean = (value) => (value == null ? "" : String(value).trim());
 
-function appointmentPricing(appointmentType) {
-  const type = clean(appointmentType).toLowerCase();
-  const isOnline = type.includes("online") || type.includes("meet.google.com");
-  if (isOnline) {
-    return {
-      appointment_type: "Online Consultation",
-      amount: APPOINTMENT_FEE_ONLINE_PAISE,
-      payable_at_clinic: 0,
-    };
-  }
-  return {
-    appointment_type: "OPD Consultation",
-    amount: APPOINTMENT_FEE_OPD_PAISE,
-    payable_at_clinic: APPOINTMENT_OPD_PAYABLE_AT_CLINIC_PAISE,
-  };
+async function appointmentPricing(body) {
+  const id = clean(body.practitioner_id);
+  if (!id) throw Object.assign(new Error('A practitioner ID is required'), {status: 400});
+  const result = await erpCallMethod('mobile_app.api.doctor_directory.list_doctors');
+  if (!Array.isArray(result.message?.doctors)) throw Object.assign(new Error('Doctor app pricing unavailable'), {status: 502});
+  const profile = result.message.doctors.find(doctor => doctor.id === id && doctor.status === 'Active');
+  return appAppointmentPricing(profile, body.appointment_type || body.appointmentType);
 }
 
 function requireRazorpayConfig(res) {
@@ -54,13 +45,22 @@ router.post("/razorpay/orders", async (req, res) => {
   if (!requireRazorpayConfig(res)) return;
 
   const body = req.body || {};
-  const pricing = appointmentPricing(body.appointment_type || body.appointmentType);
+  let pricing;
+  try {
+    pricing = await appointmentPricing(body);
+    if (body.expected_amount != null && Number(body.expected_amount) !== pricing.amount) {
+      return res.status(409).json({success: false, message: 'Consultation fee changed. Refresh the doctor list and review the new fee.'});
+    }
+  } catch (error) {
+    return res.status(error.status || 502).json({success: false, message: error.status ? error.message : 'Doctor app pricing unavailable'});
+  }
   if (!Number.isFinite(pricing.amount) || pricing.amount <= 0) {
     return res.status(400).json({ success: false, message: "Invalid appointment amount" });
   }
 
   const receipt = makeReceipt(body.receipt || body.booking_id || body.bookingId);
   const notes = {
+    practitioner_id: clean(body.practitioner_id),
     appointment_type: pricing.appointment_type,
     doctor_name: clean(body.doctor_name || body.doctorName),
     patient_name: clean(body.patient_name || body.patientName),
@@ -136,7 +136,22 @@ router.post("/razorpay/verify", async (req, res) => {
     return res.status(400).json({ success: false, message: "Invalid Razorpay signature" });
   }
 
-  const pricing = appointmentPricing(body.appointment_type || body.appointmentType);
+  // Use the order's original server amount, even if ERP fees changed after checkout.
+  let order;
+  try {
+    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+    const response = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
+      headers: {Authorization: `Basic ${auth}`}, signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) return res.status(502).json({success: false, message: 'Unable to verify payment order'});
+    order = await response.json();
+    if (order.id !== orderId || !Number.isSafeInteger(order.amount) || order.amount <= 0 ||
+        (body.practitioner_id && order.notes?.practitioner_id !== body.practitioner_id)) {
+      return res.status(400).json({success: false, message: 'Payment order does not match this appointment'});
+    }
+  } catch (_) {
+    return res.status(502).json({success: false, message: 'Unable to verify payment order'});
+  }
   return res.json({
     success: true,
     data: {
@@ -145,9 +160,9 @@ router.post("/razorpay/verify", async (req, res) => {
       payment_status: "paid",
       razorpay_order_id: orderId,
       razorpay_payment_id: paymentId,
-      paid_amount: Number(body.amount || body.paid_amount || pricing.amount),
-      currency: clean(body.currency) || RAZORPAY_CURRENCY,
-      payable_at_clinic: Number(body.payable_at_clinic ?? pricing.payable_at_clinic),
+      paid_amount: order.amount,
+      currency: order.currency,
+      payable_at_clinic: Number(order.notes?.payable_at_clinic || 0),
     },
   });
 });

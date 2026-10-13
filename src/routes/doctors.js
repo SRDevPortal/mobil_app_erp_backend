@@ -5,14 +5,19 @@ const { erpCreate, erpUpdate, erpGetList, erpGetDoc, erpCallMethod } = require("
 const { ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { mapDoctorToFrappe, pickExternalId } = require("../normalize");
 const { doctorPhotoSource } = require("../services/doctorPhotoSource");
+const { mergeDoctorDirectoryMetrics } = require("../services/doctorDirectoryMetrics");
 
 const router = express.Router();
 
 router.get("/", async (_req, res) => {
   try {
-    const result = await erpCallMethod("mobile_app.api.practitioners.list_doctors");
+    const [result, directory] = await Promise.all([
+      erpCallMethod("mobile_app.api.practitioners.list_doctors"),
+      erpCallMethod("mobile_app.api.doctor_directory.list_doctors"),
+    ]);
     const data = result.message;
-    data.doctors = data.doctors.map((doctor) => ({
+    if (!Array.isArray(directory.message?.doctors)) throw new Error("Invalid app doctor directory");
+    data.doctors = mergeDoctorDirectoryMetrics(data.doctors, directory.message.doctors).map((doctor) => ({
       ...doctor,
       image_url: doctor.image_url ? `/api/v1/doctors/${encodeURIComponent(doctor.id)}/photo` : "",
     }));

@@ -468,6 +468,9 @@ function mapAppointmentChildRowForFullSync(body = {}, parentUserExternalId) {
         : undefined;
 
   const legacyForPayload = stripUndefined({
+    patient_age: body.patient_age,
+    patient_gender: body.patient_gender,
+    chief_complaint: body.chief_complaint,
     doctor_id: body.doctor_id,
     scheduled_at: body.scheduled_at,
     is_removed_by_user: body.is_removed_by_user,
