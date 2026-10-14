@@ -23,13 +23,18 @@ async function fetchSupabaseUser(accessToken) {
   return res.json();
 }
 
-async function deleteSupabaseUser(userId) {
+function requireAccountDeletionConfig() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw Object.assign(new Error("Supabase account deletion is not configured"), { status: 503 });
   }
+}
+
+async function deleteSupabaseUser(userId) {
+  requireAccountDeletionConfig();
   const base = SUPABASE_URL.replace(/\/auth\/v1\/user\/?$/, "").replace(/\/+$/, "");
   const res = await fetch(`${base}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     method: "DELETE",
+    signal: AbortSignal.timeout(15000),
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
@@ -43,4 +48,4 @@ async function deleteSupabaseUser(userId) {
   }
 }
 
-module.exports = { fetchSupabaseUser, deleteSupabaseUser };
+module.exports = { fetchSupabaseUser, deleteSupabaseUser, requireAccountDeletionConfig };

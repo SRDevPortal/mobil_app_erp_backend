@@ -10,6 +10,8 @@ require.cache[clientPath] = {exports:{erpCallMethod: async () => ({message:{doct
   accepts_opd_appointments:true, online_consulting_charge:299, op_consulting_charge:650,
 }]}})}};
 const router = require('../src/routes/payments');
+const meetings = require('../src/services/appointmentMeetings');
+meetings.ensureReady = async () => {};
 const realFetch = global.fetch;
 let server, base, razorpayCalls;
 before(async () => {
@@ -18,8 +20,9 @@ before(async () => {
   await new Promise(resolve=>server.once('listening',resolve));
   base = `http://127.0.0.1:${server.address().port}`;
   global.fetch = async (url, options) => {
-    assert.ok(String(url).startsWith('https://api.razorpay.com/v1/orders'));
+    assert.ok(String(url).startsWith('https://api.razorpay.com/v1/'));
     razorpayCalls++;
+    if (String(url).includes('/payments/')) return new Response(JSON.stringify({id:'pay_1',order_id:'order_1',amount:29900,currency:'INR',status:'captured',captured:true}));
     const body = options.method === 'POST' ? JSON.parse(options.body) : {};
     return new Response(JSON.stringify({id:'order_1',amount:body.amount || 29900,currency:'INR',
       notes:{practitioner_id:'P1',payable_at_clinic:'0'}}), {status:200});
@@ -52,4 +55,14 @@ test('verification uses original order amount instead of edited client metadata'
   assert.equal(result.data.paid_amount,29900);
   assert.equal(result.data.currency,'INR');
   assert.equal(result.data.payable_at_clinic,0);
+});
+
+test('online meeting outage prevents creating a payment order', async () => {
+  meetings.ensureReady = async () => {throw Object.assign(new Error('Meet unavailable'), {status:503});};
+  razorpayCalls = 0;
+  try {
+    const response = await post('/razorpay/orders',{practitioner_id:'P1',appointment_type:'Online',expected_amount:29900});
+    assert.equal(response.status,503);
+    assert.equal(razorpayCalls,0);
+  } finally { meetings.ensureReady = async () => {}; }
 });

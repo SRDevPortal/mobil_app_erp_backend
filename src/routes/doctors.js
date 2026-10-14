@@ -6,6 +6,8 @@ const { ERP_BASE_URL, erpAuthHeader } = require("../config");
 const { mapDoctorToFrappe, pickExternalId } = require("../normalize");
 const { doctorPhotoSource } = require("../services/doctorPhotoSource");
 const { mergeDoctorDirectoryMetrics } = require("../services/doctorDirectoryMetrics");
+const { createDoctorPhotoCache } = require("../services/doctorPhotoCache");
+const photoCache = createDoctorPhotoCache();
 
 const router = express.Router();
 
@@ -54,18 +56,21 @@ router.get("/:id/availability", async (req, res) => {
 
 router.get("/:id/photo", async (req, res) => {
   try {
-    const doctor = await erpGetDoc("Healthcare Practitioner", req.params.id);
-    if (!doctor?.image) return res.sendStatus(404);
-    const source = doctorPhotoSource(doctor.image, ERP_BASE_URL, erpAuthHeader());
-    if (!source) return res.sendStatus(404);
-    const image = await fetch(source.url, { headers: source.headers, redirect: "error", signal: AbortSignal.timeout(15000) });
-    if (!image.ok) return res.sendStatus(image.status);
-    const type = image.headers.get("content-type") || "";
-    if (!/^image\/(png|jpeg|webp|gif)(;|$)/i.test(type)) return res.sendStatus(415);
-    res.set("Content-Type", type);
+    const photo = await photoCache.get(req.params.id, async () => {
+      const doctor = await erpGetDoc("Healthcare Practitioner", req.params.id);
+      if (!doctor?.image) throw Object.assign(new Error("Photo missing"), { status: 404 });
+      const source = doctorPhotoSource(doctor.image, ERP_BASE_URL, erpAuthHeader());
+      if (!source) throw Object.assign(new Error("Photo missing"), { status: 404 });
+      const image = await fetch(source.url, { headers: source.headers, redirect: "error", signal: AbortSignal.timeout(15000) });
+      if (!image.ok) throw Object.assign(new Error("Photo unavailable"), { status: image.status });
+      const type = image.headers.get("content-type") || "";
+      if (!/^image\/(png|jpeg|webp|gif)(;|$)/i.test(type)) throw Object.assign(new Error("Invalid photo"), { status: 415 });
+      return { type, body: Buffer.from(await image.arrayBuffer()) };
+    });
+    res.set("Content-Type", photo.type);
     res.set("Cache-Control", "private, no-store");
-    return res.send(Buffer.from(await image.arrayBuffer()));
-  } catch (_) { return res.sendStatus(502); }
+    return res.send(photo.body);
+  } catch (error) { return res.sendStatus(error.status || 502); }
 });
 
 router.post("/sync", async (req, res) => {

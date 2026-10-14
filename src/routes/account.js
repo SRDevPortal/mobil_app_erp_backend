@@ -2,7 +2,7 @@ const express = require("express");
 
 const { erpCallMethod } = require("../frappeClient");
 const { findMobileAppUser } = require("../services/userService");
-const { deleteSupabaseUser } = require("../supabaseAuth");
+const { deleteSupabaseUser, requireAccountDeletionConfig } = require("../supabaseAuth");
 
 const router = express.Router();
 
@@ -16,6 +16,8 @@ router.delete("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Type DELETE to confirm account deletion" });
     }
 
+    // Fail before erasing ERP records when the auth deletion service is missing.
+    requireAccountDeletionConfig();
     const user = await findMobileAppUser({ external_id: uid, supabase_user_id: uid }, {}, {});
     const identity = user?.name || uid;
     const erpResult = await erpCallMethod("mobile_app.api.v1.users_delete", {
@@ -23,7 +25,11 @@ router.delete("/", async (req, res) => {
       body: { external_id: identity, supabase_user_id: uid },
       appToken: true,
     });
-    const deleted = erpResult?.message?.data?.deleted || erpResult?.data?.deleted || {};
+    const result = erpResult?.message || erpResult;
+    if (result?.success !== true || !result.data?.deleted || typeof result.data.deleted !== 'object') {
+      throw Object.assign(new Error('ERP account deletion was not confirmed; authentication account was retained'), {status: 502});
+    }
+    const deleted = result.data.deleted;
 
     await deleteSupabaseUser(uid);
     return res.json({ success: true, data: { deleted } });

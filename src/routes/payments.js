@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const express = require("express");
 const {
   RAZORPAY_CURRENCY,
@@ -7,6 +6,8 @@ const {
 } = require("../config");
 const { erpCallMethod } = require('../frappeClient');
 const { appAppointmentPricing } = require('../services/appAppointmentPricing');
+const appointmentMeetings = require('../services/appointmentMeetings');
+const {verifyAppointmentPayment} = require('../services/verifyAppointmentPayment');
 
 const router = express.Router();
 
@@ -35,11 +36,6 @@ function makeReceipt(input) {
   return raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
 }
 
-function safeEqualHex(left, right) {
-  const a = Buffer.from(clean(left), "hex");
-  const b = Buffer.from(clean(right), "hex");
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 router.post("/razorpay/orders", async (req, res) => {
   if (!requireRazorpayConfig(res)) return;
@@ -48,6 +44,9 @@ router.post("/razorpay/orders", async (req, res) => {
   let pricing;
   try {
     pricing = await appointmentPricing(body);
+    if (pricing.appointment_type.toLowerCase().includes('online')) {
+      await appointmentMeetings.ensureReady();
+    }
     if (body.expected_amount != null && Number(body.expected_amount) !== pricing.amount) {
       return res.status(409).json({success: false, message: 'Consultation fee changed. Refresh the doctor list and review the new fee.'});
     }
@@ -60,6 +59,7 @@ router.post("/razorpay/orders", async (req, res) => {
 
   const receipt = makeReceipt(body.receipt || body.booking_id || body.bookingId);
   const notes = {
+    ...(req.authUser?.id ? {supabase_user_id: req.authUser.id} : {}),
     practitioner_id: clean(body.practitioner_id),
     appointment_type: pricing.appointment_type,
     doctor_name: clean(body.doctor_name || body.doctorName),
@@ -122,49 +122,12 @@ router.post("/razorpay/orders", async (req, res) => {
 router.post("/razorpay/verify", async (req, res) => {
   if (!requireRazorpayConfig(res)) return;
 
-  const body = req.body || {};
-  const orderId = clean(body.razorpay_order_id || body.order_id || body.orderId);
-  const paymentId = clean(body.razorpay_payment_id || body.payment_id || body.paymentId);
-  const signature = clean(body.razorpay_signature || body.signature);
-
-  if (!orderId || !paymentId || !signature) {
-    return res.status(400).json({ success: false, message: "Missing Razorpay payment verification fields" });
-  }
-
-  const expected = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET).update(`${orderId}|${paymentId}`).digest("hex");
-  if (!safeEqualHex(signature, expected)) {
-    return res.status(400).json({ success: false, message: "Invalid Razorpay signature" });
-  }
-
-  // Use the order's original server amount, even if ERP fees changed after checkout.
-  let order;
   try {
-    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
-    const response = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
-      headers: {Authorization: `Basic ${auth}`}, signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) return res.status(502).json({success: false, message: 'Unable to verify payment order'});
-    order = await response.json();
-    if (order.id !== orderId || !Number.isSafeInteger(order.amount) || order.amount <= 0 ||
-        (body.practitioner_id && order.notes?.practitioner_id !== body.practitioner_id)) {
-      return res.status(400).json({success: false, message: 'Payment order does not match this appointment'});
-    }
-  } catch (_) {
-    return res.status(502).json({success: false, message: 'Unable to verify payment order'});
+    const data = await verifyAppointmentPayment(req.body || {}, req.authUser?.id);
+    return res.json({success: true, data});
+  } catch (error) {
+    return res.status(error.status || 502).json({success: false, message: error.message});
   }
-  return res.json({
-    success: true,
-    data: {
-      verified: true,
-      payment_provider: "razorpay",
-      payment_status: "paid",
-      razorpay_order_id: orderId,
-      razorpay_payment_id: paymentId,
-      paid_amount: order.amount,
-      currency: order.currency,
-      payable_at_clinic: Number(order.notes?.payable_at_clinic || 0),
-    },
-  });
 });
 
 module.exports = router;

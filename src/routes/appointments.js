@@ -4,6 +4,8 @@ const { DOCTYPE } = require("../config");
 const { erpCreate, erpDelete, erpGetDoc, erpGetList, erpUpdate, erpCallMethod } = require("../frappeClient");
 const { findMobileAppUser, tryUsersLookupV1, unwrapMobileAppV1Message } = require("../services/userService");
 const { mapAppointmentChildRowForFullSync, pickExternalId, pickPhone } = require("../normalize");
+const appointmentMeetings = require('../services/appointmentMeetings');
+const {verifyAppointmentPayment} = require('../services/verifyAppointmentPayment');
 
 const router = express.Router();
 
@@ -231,6 +233,29 @@ router.post("/", async (req, res) => {
     }
 
     const rowBody = { ...body };
+    let meeting = null;
+    if (body.practitioner_id) {
+      const existing = body.booking_id ? await erpGetList(DOCTYPE.MOBILE_APP_APPOINTMENT, {
+        filters: [['booking_id', '=', body.booking_id]],
+        fields: ['name', 'mobile_app_user', 'consultation_type'], limit: 1,
+      }) : [];
+      if (existing.length && existing[0].mobile_app_user !== userRow?.name) {
+        return res.status(403).json({success: false, message: 'Booking does not belong to this patient'});
+      }
+      if (!existing.length) Object.assign(rowBody, await verifyAppointmentPayment(body, req.authUser?.id, {allowMissingSignature: true}));
+      const consultation = String(body.consultation_type || body.appointment_type || '').toLowerCase();
+      const online = consultation.includes('online') || consultation.includes('meet.google.com');
+      if (existing.length && online !== (String(existing[0].consultation_type).toLowerCase().includes('online') || String(existing[0].consultation_type).includes('meet.google.com'))) {
+        return res.status(409).json({success: false, message: 'Rescheduling must retain the original consultation mode'});
+      }
+      if (online) {
+        meeting = await appointmentMeetings.ensureMeeting({userId: userRow?.name || parentExternalId,
+          bookingId: body.booking_id, date: body.appointment_date, time: body.appointment_time});
+        rowBody.consultation_type = meeting.meeting_link;
+        rowBody.appointment_type = meeting.meeting_link;
+        rowBody.meeting_event_id = meeting.meeting_event_id;
+      }
+    }
     const newRow = mapAppointmentChildRowForFullSync(rowBody, parentExternalId);
     if (!newRow?.appointment_external_id) {
       return res.status(400).json({ success: false, message: "appointment_external_id could not be set" });
@@ -243,7 +268,14 @@ router.post("/", async (req, res) => {
         method: "POST",
         body: { user_name: userRow?.name || parentExternalId, appointment: newRow },
       });
-      return res.status(201).json({ success: true, data: result.message });
+      if (meeting) {
+        // A rejected ERP reschedule must not move the organizer's calendar event.
+        // Synchronize calendar time only after ERP commits the accepted slot.
+        appointmentMeetings.ensureMeeting({userId: userRow?.name || parentExternalId,
+          bookingId: body.booking_id, date: body.appointment_date, time: body.appointment_time,
+          updateExistingTime: true}).catch(() => console.error('[appointments] Calendar time sync requires retry'));
+      }
+      return res.status(201).json({ success: true, data: {...result.message, ...(meeting || {})} });
     }
 
     let existing = [];

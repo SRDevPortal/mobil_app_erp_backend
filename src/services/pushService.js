@@ -70,7 +70,8 @@ async function sendOneSignalPush({ oneSignalUserId, oneSignalPushToken, title, b
       }),
     });
     const detail = await parseResponse(response);
-    const result = response.ok
+    const accepted = response.ok && Boolean(detail?.id) && detail?.recipients !== 0 && !detail?.errors;
+    const result = accepted
       ? { sent: true, provider: "onesignal", target: target.name, detail }
       : { sent: false, provider: "onesignal", target: target.name, status: response.status, detail };
     attempts.push(result);
